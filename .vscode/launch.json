@@ -1,0 +1,24 @@
+{
+    "$schema": "https://raw.githubusercontent.com/mfussenegger/dapconfig-schema/master/dapconfig-schema.json",
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "python",
+            "request": "launch",
+            "name": "Launch main",
+            "program": "/root/workspace/GitHub/Data-Assimilation-Flow-Matching/src/dafm/main.py",
+            "args": [
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "${input:gpu}"
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "gpu",
+            "type": "promptString",
+            "description": "Pick a GPU"
+        }
+    ]
+}
