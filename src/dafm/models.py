@@ -109,19 +109,27 @@ class Score(Model):
         ).mean()
 
     @torch.no_grad
-    def sample(self, current_states, time_step_count=600):
+    def sample(self, current_states, observation, time_step_count=600):
         times = torch.linspace(1., self.eps, time_step_count, device=current_states.device)
-        time_step_size = times[1] - times[0]
+        time_step_size = times[0] - times[1]
         state = torch.randn_like(current_states) * self.sigma(torch.ones(1, device=current_states.device), self.sigma_max)
         for t in times:
             score = self(t, state)
-
             # why use mean? like RMSE?
             score_norm = reduce(score**2, 'batch dim -> batch', 'mean').sqrt()
             norm_max = 50
             score_rescaling = torch.ones_like(score)
             score_rescaling[score_norm > norm_max] = norm_max / score_rescaling[score_norm > norm_max]
             score = score * score_rescaling
+
+            if observation is None:
+                observation_score = 0.
+            else:
+                observation_noise_std = 0.1
+                # this seems backwards; should it be (observation - state)? because we are given state?
+                observation_score = -(state - observation) / observation_noise_std**2
+
+            score = score + observation_score
 
             g = self.sigma_max**t
             state_drift = state + g**2 * score * time_step_size
