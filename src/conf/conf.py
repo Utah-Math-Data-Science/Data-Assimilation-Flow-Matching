@@ -24,8 +24,8 @@ class Conf(orm.Table):
     fit: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
     time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=100)
-    epoch_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=100)
-    batch_size: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=10)
+    epoch_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
+    batch_size: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1000)
     shuffle_training_samples: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
     @property

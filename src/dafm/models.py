@@ -75,6 +75,9 @@ class Model(nn.Module):
 
         return unembedded_state
 
+    def get_optimizer(self, time_step):
+        raise NotImplementedError()
+
 
 class Score(Model):
     sigma_max = 25
@@ -82,6 +85,10 @@ class Score(Model):
 
     def forward(self, time, state):
         return super().forward(time, state) / self.sigma(time, self.sigma_max)
+
+    def get_optimizer(self, time_step):
+        lr = 0.005 if time_step == 0 else 0.01
+        return torch.optim.Adam(self.parameters(), lr=lr)
 
     def sigma(self, t, sigma):
         return torch.sqrt(
@@ -102,7 +109,7 @@ class Score(Model):
         ).mean()
 
     @torch.no_grad
-    def sample(self, current_states, time_step_count=1000):
+    def sample(self, current_states, time_step_count=600):
         times = torch.linspace(1., self.eps, time_step_count, device=current_states.device)
         time_step_size = times[1] - times[0]
         state = torch.randn_like(current_states) * self.sigma(torch.ones(1, device=current_states.device), self.sigma_max)

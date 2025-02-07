@@ -20,20 +20,23 @@ log = logging.getLogger(__file__)
 class DataAssimilation(pl.LightningModule):
     def __init__(self, cfg, dataset, model):
         super().__init__()
+        self.automatic_optimization = False
+
         self.cfg = cfg
         self.dataset = dataset
         self.dataset_iterable = None
         self.model = model
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.model.parameters(), lr=5e-3)
+        return None
 
     def setup(self, stage):
         if stage == 'fit':
             self.dataset_iterable = iter(self.dataset)
 
     def train_dataloader(self):
-        time, predicted_states, observation = next(self.dataset_iterable)
+        time_step, time, predicted_states, observation = next(self.dataset_iterable)
+        self.optimizer = self.model.get_optimizer(time_step)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
                     time=DataLoader([time]),
@@ -46,7 +49,11 @@ class DataAssimilation(pl.LightningModule):
     def training_step(self, batch, _):
         batch, _, epoch = batch
         batch, batch_idx, _ = batch
-        return self.model.loss(batch['predicted_states'])
+        self.optimizer.zero_grad()
+        loss = self.model.loss(batch['predicted_states'])
+        self.manual_backward(loss)
+        self.optimizer.step()
+        return {f'loss_train_epoch_{epoch}': loss}
 
 
 @hydra.main(**utils.HYDRA_INIT)

@@ -28,7 +28,7 @@ class PredictedStatesAndObservation(IterableDataset):
         self.true_state = -1 + torch.randn((1,), device=self.cfg.device) * self.true_initial_condition_noise_std
         self.predicted_states = self.true_state + torch.randn((self.predicted_state_count, 1), device=self.cfg.device) * self.predicted_initial_condition_noise_std
         for time_step, t in enumerate(self.times):
-            yield t, self.predicted_states, self.make_observation(self.true_state)
+            yield time_step, t, self.predicted_states, self.make_observation(self.true_state)
             current_states = self.model.sample(self.predicted_states)
             self.true_state = self.model_dynamics(time_step, t, self.true_state)
             self.predicted_states = self.model_dynamics(time_step, t, current_states)
