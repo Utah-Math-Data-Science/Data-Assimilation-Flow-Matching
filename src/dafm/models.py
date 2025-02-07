@@ -4,6 +4,11 @@ import torch.nn as nn
 from einops import rearrange, reduce
 
 
+class Identity:
+    def sample(self, current_states):
+        return current_states
+
+
 class GaussianFourierProjection(nn.Module):
     def __init__(self, frequency_count, frequency_std=30.):
         super().__init__()
