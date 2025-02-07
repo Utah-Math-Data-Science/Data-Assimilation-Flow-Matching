@@ -11,31 +11,32 @@ import lightning.pytorch as pl
 from pytorch_lightning.utilities import CombinedLoader
 
 from conf import conf
-from dafm import callbacks, datasets, loggers, utils
+from dafm import callbacks, datasets, loggers, models, utils
 
 
 log = logging.getLogger(__file__)
 
 
 class DataAssimilation(pl.LightningModule):
-    def __init__(self, cfg, dataset):
+    def __init__(self, cfg, dataset, model):
         super().__init__()
         self.cfg = cfg
         self.dataset = dataset
         self.dataset_iterable = None
-        self.parameter = nn.Parameter(torch.tensor(1.))
+        self.model = model
 
     def configure_optimizers(self):
-        return None
+        return torch.optim.Adam(self.model.parameters(), lr=5e-3)
 
     def setup(self, stage):
         if stage == 'fit':
             self.dataset_iterable = iter(self.dataset)
 
     def train_dataloader(self):
-        predicted_states, observation = next(self.dataset_iterable)
+        time, predicted_states, observation = next(self.dataset_iterable)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
+                    time=DataLoader([time]),
                     predicted_states=DataLoader(predicted_states, batch_size=self.cfg.batch_size, shuffle=self.cfg.shuffle_training_samples),
                     observation=DataLoader([observation]),
             ), mode='max_size_cycle'))
@@ -45,7 +46,7 @@ class DataAssimilation(pl.LightningModule):
     def training_step(self, batch, _):
         batch, _, epoch = batch
         batch, batch_idx, _ = batch
-        return self.parameter * batch['predicted_states'].pow(2).mean()
+        return self.model.loss(batch['predicted_states'])
 
 
 @hydra.main(**utils.HYDRA_INIT)
@@ -65,14 +66,16 @@ def main(cfg):
         logger=logger,
         max_epochs=cfg.epoch_count,
         check_val_every_n_epoch=cfg.epoch_count,
+        reload_dataloaders_every_n_epochs=1,
         deterministic=True,
         callbacks=[
             callbacks.TimeStepProgressBar(cfg),
         ],
     )
 
-    dataset = datasets.PredictedStatesAndObservation()
-    data_assimilation = DataAssimilation(cfg, dataset)
+    model = models.Score(1, 50, 2, False)
+    dataset = datasets.PredictedStatesAndObservation(cfg, model)
+    data_assimilation = DataAssimilation(cfg, dataset, model)
 
     trainer.fit(data_assimilation)
 
