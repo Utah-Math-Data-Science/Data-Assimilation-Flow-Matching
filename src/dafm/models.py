@@ -121,7 +121,7 @@ class Score(Model):
         diffusion_times = torch.linspace(1., self.eps, time_step_count, device=current_states.device)
         time_step_size = diffusion_times[0] - diffusion_times[1]
         state = torch.randn_like(current_states) * self.sigma(torch.ones(1, device=current_states.device), self.sigma_max)
-        for t in diffusion_times:
+        for t in diffusion_times[:-1]:
             score = self(t, state)
             # why use mean? like RMSE?
             score_norm = reduce(score**2, 'batch dim -> batch', 'mean').sqrt()
@@ -144,6 +144,7 @@ class Score(Model):
             state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
 
         # no noise in final step
+        log.info(reduce(state_drift, 'batch dim -> dim', 'mean'))
         return state_drift
 
 
