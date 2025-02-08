@@ -49,8 +49,9 @@ class DataAssimilation(pl.LightningModule):
 
     def training_step(self, batch, _):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
+        observation = None if batch['time_step'] == 0 else batch['observation']
         self.optimizer.zero_grad()
-        loss = self.model.loss(batch['predicted_states'])
+        loss = self.model.loss(batch['predicted_states'], observation)
         self.manual_backward(loss)
         self.optimizer.step()
         return dict(loss=loss)

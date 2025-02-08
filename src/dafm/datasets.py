@@ -16,10 +16,10 @@ class PredictedStatesAndObservation(IterableDataset):
         self.true_initial_condition_noise_std = 0.02
         self.predicted_initial_condition_noise_std = 0.2
 
-    def model_dynamics(self, time_step, t, x):
+    def model_dynamics(self, time_step, t, x, noise_coefficient):
         if time_step > 0 and (time_step + 1) % 20 == 0:
             x = -x
-        return x - 4 * x * (x**2 - 1) * self.dt + self.model_noise_std * torch.randn(x.shape, device=self.cfg.device) * torch.sqrt(self.dt)
+        return x - 4 * x * (x**2 - 1) * self.dt + noise_coefficient * torch.randn(x.shape, device=self.cfg.device) * torch.sqrt(self.dt)
 
     def make_observation(self, true_state):
         return true_state + torch.randn(true_state.shape, device=self.cfg.device) * self.observation_noise_std
@@ -32,8 +32,9 @@ class PredictedStatesAndObservation(IterableDataset):
 
             yield time_step, t, self.predicted_states, observation
 
-            self.true_state = self.model_dynamics(time_step, t, self.true_state)
+            self.true_state = self.model_dynamics(time_step, t, self.true_state, self.model_noise_std)
             # why no observation of the initial conditions in the first sampling?
             # because we are only allowed to guess the initial conditions, and then hone in our predictions?
             current_states = self.model.sample(self.predicted_states, None if time_step == 0 else observation)
-            self.predicted_states = self.model_dynamics(time_step, t, current_states)
+            # why is the noise coefficient 1 here?
+            self.predicted_states = self.model_dynamics(time_step, t, current_states, 1.)

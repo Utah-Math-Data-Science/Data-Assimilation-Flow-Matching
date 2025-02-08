@@ -102,7 +102,7 @@ class Score(Model):
             / np.log(sigma)
         )
 
-    def loss(self, state):
+    def loss(self, state, observation):
         diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.eps) + self.eps
         noise = torch.randn_like(state)
         std = self.sigma(diffusion_time, self.sigma_max)
