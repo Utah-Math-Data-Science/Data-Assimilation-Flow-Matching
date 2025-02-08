@@ -169,7 +169,7 @@ class FlowMatching(Model):
         predicted_velocity = rearrange(
             self(diffusion_time, noise_flowed_to_t),
             '(batch predicted_state_count) dim -> batch predicted_state_count dim',
-            batch=state.shape[0]
+            batch=batch_size
         )
         if observation is None:
             weighting = 1.
