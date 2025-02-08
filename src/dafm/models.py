@@ -159,7 +159,7 @@ class FlowMatching(Model):
     def loss(self, state, observation):
         batch_size = state.shape[0]
         diffusion_time = torch.rand((batch_size, 1), device=state.device)
-        noise = torch.randn_like(state)
+        noise = torch.randn_like(state[:batch_size])
         target_velocity = state[None] - noise[:, None]
         noise_flowed_to_t = rearrange(
             (diffusion_time * state)[None] + ((1 - diffusion_time) * noise)[:, None],
