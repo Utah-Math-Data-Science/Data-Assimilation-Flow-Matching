@@ -1,5 +1,11 @@
+import logging
+
+from einops import reduce
 import torch
 from torch.utils.data.dataset import IterableDataset
+
+
+log = logging.getLogger(__file__)
 
 
 class PredictedStatesAndObservation(IterableDataset):
@@ -38,3 +44,4 @@ class PredictedStatesAndObservation(IterableDataset):
             current_states = self.model.sample(self.predicted_states, None if time_step == 0 else observation)
             # why is the noise coefficient 1 here?
             self.predicted_states = self.model_dynamics(time_step, t, current_states, 1.)
+            log.info(reduce(self.predicted_states, 'batch dim -> dim', 'mean'))

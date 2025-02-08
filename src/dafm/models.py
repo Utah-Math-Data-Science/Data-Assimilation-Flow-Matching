@@ -146,3 +146,45 @@ class Score(Model):
         # no noise in final step
         return state_drift
 
+
+class FlowMatching(Model):
+    def forward(self, time, state):
+        return super().forward(time, state)
+
+    def get_optimizer(self, time_step):
+        lr = 0.005 if time_step == 0 else 0.01
+        return torch.optim.Adam(self.parameters(), lr=lr)
+
+    def loss(self, state, observation):
+        diffusion_time = torch.rand((1, 1), device=state.device)
+        noise = torch.randn_like(state[:1])
+        target_velocity = state - noise
+        noise_flowed_to_t = (1 - diffusion_time) * noise + diffusion_time * state
+        predicted_velocity = self(diffusion_time, noise_flowed_to_t)
+        if observation is None:
+            weighting = 1.
+        else:
+            observation_noise_std = 0.1
+            weighting = torch.exp(
+                - 0.5 * reduce(
+                    (observation - state)**2,
+                    'predicted_state_count dim -> predicted_state_count 1', 'sum'
+                ) / observation_noise_std**2
+            )
+        return reduce(
+            weighting * (predicted_velocity - target_velocity)**2,
+            'predicted_state_count dim -> predicted_state_count', 'sum'
+        ).mean()
+
+    @torch.no_grad
+    def sample(self, current_states, observation, time_step_count=600):
+        diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
+        time_step_size = diffusion_times[1] - diffusion_times[0]
+        state = torch.randn_like(current_states)
+        for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
+            xdot_now = self(t_now, state)
+            temp = state + time_step_size * xdot_now
+            state = state + time_step_size * (temp + self(t_next, state)) / 2
+        log.info(reduce(state, 'batch dim -> dim', 'mean'))
+
+        return state

@@ -83,7 +83,7 @@ def main(cfg):
         ],
     )
 
-    model = models.Score(1, 50, 2, False)
+    model = models.FlowMatching(1, 50, 2, False)
     dataset = datasets.PredictedStatesAndObservation(cfg, model)
     data_assimilation = DataAssimilation(cfg, dataset, model)
 
