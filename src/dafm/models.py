@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange, reduce
+from einops import rearrange, reduce, repeat
 
 
 log = logging.getLogger(__file__)
@@ -157,11 +157,20 @@ class FlowMatching(Model):
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def loss(self, state, observation):
-        diffusion_time = torch.rand((1, 1), device=state.device)
-        noise = torch.randn_like(state[:1])
-        target_velocity = state - noise
-        noise_flowed_to_t = (1 - diffusion_time) * noise + diffusion_time * state
-        predicted_velocity = self(diffusion_time, noise_flowed_to_t)
+        batch_size = state.shape[0]
+        diffusion_time = torch.rand((batch_size, 1), device=state.device)
+        noise = torch.randn_like(state)
+        target_velocity = state[None] - noise[:, None]
+        noise_flowed_to_t = rearrange(
+            (diffusion_time * state)[None] + ((1 - diffusion_time) * noise)[:, None],
+            'batch predicted_state_count dim -> (batch predicted_state_count) dim'
+        )
+        diffusion_time = repeat(diffusion_time, 'batch dim -> (repeat batch) dim', repeat=batch_size)
+        predicted_velocity = rearrange(
+            self(diffusion_time, noise_flowed_to_t),
+            '(batch predicted_state_count) dim -> batch predicted_state_count dim',
+            batch=state.shape[0]
+        )
         if observation is None:
             weighting = 1.
         else:
@@ -169,12 +178,12 @@ class FlowMatching(Model):
             weighting = torch.exp(
                 - 0.5 * reduce(
                     (observation - state)**2,
-                    'predicted_state_count dim -> predicted_state_count 1', 'sum'
+                    'predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
                 ) / observation_noise_std**2
             )
         return reduce(
             weighting * (predicted_velocity - target_velocity)**2,
-            'predicted_state_count dim -> predicted_state_count', 'sum'
+            'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
         ).mean()
 
     @torch.no_grad
@@ -183,9 +192,10 @@ class FlowMatching(Model):
         time_step_size = diffusion_times[1] - diffusion_times[0]
         state = torch.randn_like(current_states)
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
-            xdot_now = self(t_now, state)
-            temp = state + time_step_size * xdot_now
-            state = state + time_step_size * (temp + self(t_next, state)) / 2
+            state = state + time_step_size * self(t_now, state)
+            # xdot_now = self(t_now, state)
+            # temp = state + time_step_size * xdot_now
+            # state = state + time_step_size * (temp + self(t_next, state)) / 2
         log.info(reduce(state, 'batch dim -> dim', 'mean'))
 
         return state
