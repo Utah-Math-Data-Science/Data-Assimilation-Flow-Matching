@@ -192,10 +192,10 @@ class FlowMatching(Model):
         time_step_size = diffusion_times[1] - diffusion_times[0]
         state = torch.randn_like(current_states)
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
-            state = state + time_step_size * self(t_now, state)
-            # xdot_now = self(t_now, state)
-            # temp = state + time_step_size * xdot_now
-            # state = state + time_step_size * (temp + self(t_next, state)) / 2
+            # state = state + time_step_size * self(t_now, state)
+            xdot_now = self(t_now, state)
+            temp = state + time_step_size * xdot_now
+            state = state + time_step_size * (xdot_now + self(t_next, temp)) / 2
         log.info(reduce(state, 'batch dim -> dim', 'mean'))
 
         return state
