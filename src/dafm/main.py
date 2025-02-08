@@ -2,6 +2,7 @@ import logging
 import pprint
 import sys
 
+from einops import reduce
 import hydra
 from omegaconf import OmegaConf
 import torch
@@ -41,10 +42,10 @@ class DataAssimilation(pl.LightningModule):
             epoch: iter(CombinedLoader(dict(
                     time_step=DataLoader([time_step]),
                     time=DataLoader([time]),
-                    predicted_states=DataLoader(predicted_states, batch_size=self.cfg.batch_size, shuffle=self.cfg.shuffle_training_samples),
+                    predicted_states=DataLoader(predicted_states, batch_size=self.cfg.model.batch_size, shuffle=self.cfg.model.shuffle_training_samples),
                     observation=DataLoader([observation]),
             ), mode='max_size_cycle'))
-            for epoch in range(self.cfg.epoch_count)
+            for epoch in range(self.cfg.model.epoch_count)
         }, mode='sequential')
 
     def training_step(self, batch, _):
@@ -72,8 +73,8 @@ def main(cfg):
 
     trainer = pl.Trainer(
         logger=logger,
-        max_epochs=cfg.epoch_count,
-        check_val_every_n_epoch=cfg.epoch_count,
+        max_epochs=cfg.model.epoch_count,
+        check_val_every_n_epoch=cfg.model.epoch_count,
         reload_dataloaders_every_n_epochs=1,
         deterministic=True,
         callbacks=[
@@ -83,8 +84,9 @@ def main(cfg):
         ],
     )
 
-    model = models.FlowMatching(1, 50, 2, False)
-    dataset = datasets.PredictedStatesAndObservation(cfg, model)
+    dynamics = datasets.get_dynamics_dataset(cfg.dataset)
+    model = models.get_model(cfg.model, dynamics.state_dimension, cfg.dataset.observation_std)
+    dataset = datasets.PredictedStatesAndObservation(dynamics, model, cfg.device)
     data_assimilation = DataAssimilation(cfg, dataset, model)
 
     trainer.fit(data_assimilation)

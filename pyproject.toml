@@ -7,7 +7,7 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Taos Transue", email = "taos.transue@utah.edu" }
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "debugpy>=1.8.12",
     "einops>=0.8.0",

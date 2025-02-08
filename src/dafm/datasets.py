@@ -1,47 +1,60 @@
 import logging
 
-from einops import reduce
 import torch
 from torch.utils.data.dataset import IterableDataset
+
+import conf.datasets
 
 
 log = logging.getLogger(__file__)
 
 
-class PredictedStatesAndObservation(IterableDataset):
-    def __init__(self, cfg, model):
-        self.cfg = cfg
-        self.model = model
-        self.predicted_state_count = 1000
-        self.predicted_states = None
-        self.true_state = None
-        self.dt = torch.tensor(0.1, device=cfg.device)
-        self.times = self.dt * torch.arange(cfg.time_step_count, device=cfg.device)[:, None]
-        self.model_noise_std = 0.2
-        self.observation_noise_std = 0.1
-        self.true_initial_condition_noise_std = 0.02
-        self.predicted_initial_condition_noise_std = 0.2
+class DoubleWell:
+    state_dimension = 1
 
-    def model_dynamics(self, time_step, t, x, noise_coefficient):
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def times(self):
+        return self.cfg.time_step_size * torch.arange(self.cfg.time_step_count)[:, None]
+
+    def initialize_states(self):
+        true_state = -1 + torch.randn(1) * self.cfg.true_state_initial_condition_std
+        predicted_states = true_state + torch.randn((self.cfg.predicted_state_count, 1)) * self.cfg.predicted_state_initial_condition_std
+        return true_state, predicted_states
+
+    def dynamics(self, time_step, t, x, is_predicted_state=True):
         if time_step > 0 and (time_step + 1) % 20 == 0:
             x = -x
-        return x - 4 * x * (x**2 - 1) * self.dt + noise_coefficient * torch.randn(x.shape, device=self.cfg.device) * torch.sqrt(self.dt)
+        # why is the noise coefficient 1 here when is_predicted_state is True?
+        noise_coefficient = 1 if is_predicted_state else self.cfg.model_std
+        return x - 4 * x * (x**2 - 1) * self.cfg.time_step_size + noise_coefficient * torch.randn(x.shape, device=x.device) * (self.cfg.time_step_size)**(1/2)
 
-    def make_observation(self, true_state):
-        return true_state + torch.randn(true_state.shape, device=self.cfg.device) * self.observation_noise_std
+    def observe(self, true_state):
+        return true_state + torch.randn_like(true_state) * self.cfg.observation_std
+
+
+class PredictedStatesAndObservation(IterableDataset):
+    def __init__(self, dataset, model, device):
+        self.dataset = dataset
+        self.model = model
+        self.device = device
+        self.times = dataset.times().to(device)
 
     def __iter__(self):
-        self.true_state = -1 + torch.randn((1,), device=self.cfg.device) * self.true_initial_condition_noise_std
-        self.predicted_states = self.true_state + torch.randn((self.predicted_state_count, 1), device=self.cfg.device) * self.predicted_initial_condition_noise_std
+        self.true_state, self.predicted_states = map(lambda x: x.to(self.device), self.dataset.initialize_states())
         for time_step, t in enumerate(self.times):
-            observation = self.make_observation(self.true_state)
-
+            observation = self.dataset.observe(self.true_state)
             yield time_step, t, self.predicted_states, observation
-
-            self.true_state = self.model_dynamics(time_step, t, self.true_state, self.model_noise_std)
+            self.true_state = self.dataset.dynamics(time_step, t, self.true_state, is_predicted_state=False)
             # why no observation of the initial conditions in the first sampling?
             # because we are only allowed to guess the initial conditions, and then hone in our predictions?
             current_states = self.model.sample(self.predicted_states, None if time_step == 0 else observation)
-            # why is the noise coefficient 1 here?
-            self.predicted_states = self.model_dynamics(time_step, t, current_states, 1.)
-            log.info(reduce(self.predicted_states, 'batch dim -> dim', 'mean'))
+            self.predicted_states = self.dataset.dynamics(time_step, t, current_states)
+
+
+def get_dynamics_dataset(cfg):
+    if isinstance(cfg, conf.datasets.DoubleWell):
+        return DoubleWell(cfg)
+    else:
+        raise ValueError(f'Unknown dynamics dataset: {cfg}')

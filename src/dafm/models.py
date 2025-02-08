@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange, reduce, repeat
 
+import conf.models
+
 
 log = logging.getLogger(__file__)
 
@@ -48,26 +50,28 @@ class ResidualBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, state_dimension, embedding_dimension, hidden_residual_blocks, use_batch_norm):
+    def __init__(self, cfg, state_dimension, observation_std):
         super().__init__()
-
-        if embedding_dimension % 2 != 0:
+        self.cfg = cfg
+        self.state_dimension = state_dimension
+        self.observation_std = observation_std
+        if cfg.embedding_dimension % 2 != 0:
             raise ValueError(
                 'The embedding dimension must be even because it is twice the number of frequencies for the Gaussian Fourier projection of the time embedding.'
-                f' The embedding dimension specified is {embedding_dimension}.'
+                f' The embedding dimension specified is {cfg.embedding_dimension}.'
             )
 
         self.embed_time = nn.Sequential(
-            GaussianFourierProjection(frequency_count=embedding_dimension // 2),
-            nn.Linear(embedding_dimension, embedding_dimension),
+            GaussianFourierProjection(frequency_count=cfg.embedding_dimension // 2),
+            nn.Linear(cfg.embedding_dimension, cfg.embedding_dimension),
             nn.SiLU(),
         )
-        self.embed_state = nn.Linear(state_dimension, embedding_dimension)
+        self.embed_state = nn.Linear(state_dimension, cfg.embedding_dimension)
         self.residual_blocks = nn.ModuleList([
-            ResidualBlock(embedding_dimension, use_batch_norm)
-            for _ in range(hidden_residual_blocks)
+            ResidualBlock(cfg.embedding_dimension, cfg.use_batch_norm)
+            for _ in range(cfg.residual_block_count)
         ])
-        self.unembed_state = nn.Linear(embedding_dimension, state_dimension)
+        self.unembed_state = nn.Linear(cfg.embedding_dimension, state_dimension)
 
 
     def forward(self, time, state):
@@ -84,28 +88,25 @@ class Model(nn.Module):
         raise NotImplementedError()
 
 
-class Score(Model):
-    sigma_max = 25
-    eps = 1e-3
-
+class ScoreMatching(Model):
     def forward(self, time, state):
-        return super().forward(time, state) / self.sigma(time, self.sigma_max)
+        return super().forward(time, state) / self.sigma(time, self.cfg.sigma_max)
 
     def get_optimizer(self, time_step):
         lr = 0.005 if time_step == 0 else 0.01
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def sigma(self, t, sigma):
-        return torch.sqrt(
+        return (
             (sigma**(2 * t) - 1)
             / 2
             / np.log(sigma)
-        )
+        )**(1/2)
 
     def loss(self, state, observation):
-        diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.eps) + self.eps
+        diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.time_min) + self.cfg.time_min
         noise = torch.randn_like(state)
-        std = self.sigma(diffusion_time, self.sigma_max)
+        std = self.sigma(diffusion_time, self.cfg.sigma_max)
         noised_state = state + noise * std
         predicted_score = self(diffusion_time, noised_state)
         return reduce(
@@ -117,10 +118,11 @@ class Score(Model):
         return (1 - 2 * t).clamp(min=0)
 
     @torch.no_grad
-    def sample(self, current_states, observation, time_step_count=600):
-        diffusion_times = torch.linspace(1., self.eps, time_step_count, device=current_states.device)
+    def sample(self, current_states, observation, time_step_count=None):
+        time_step_count = time_step_count or self.cfg.sampling_time_step_count
+        diffusion_times = torch.linspace(1., self.cfg.time_min, time_step_count, device=current_states.device)
         time_step_size = diffusion_times[0] - diffusion_times[1]
-        state = torch.randn_like(current_states) * self.sigma(torch.ones(1, device=current_states.device), self.sigma_max)
+        state = torch.randn_like(current_states) * self.sigma(1, self.cfg.sigma_max)
         for t in diffusion_times[:-1]:
             score = self(t, state)
             # why use mean? like RMSE?
@@ -133,18 +135,16 @@ class Score(Model):
             if observation is None:
                 observation_score = 0.
             else:
-                observation_noise_std = 0.1
                 # this seems backwards; should it be (observation - state)? because we are given state?
-                observation_score = -(state - observation) / observation_noise_std**2
+                observation_score = -(state - observation) / self.observation_std**2
 
             score = score + observation_score * self.observation_likelihood_score_damping(t)
 
-            g = self.sigma_max**t
+            g = self.cfg.sigma_max**t
             state_drift = state + g**2 * score * time_step_size
             state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
 
         # no noise in final step
-        log.info(reduce(state_drift, 'batch dim -> dim', 'mean'))
         return state_drift
 
 
@@ -157,7 +157,7 @@ class FlowMatching(Model):
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def loss(self, state, observation):
-        batch_size = state.shape[0]
+        batch_size = self.cfg.loss_sample_count
         diffusion_time = torch.rand((batch_size, 1), device=state.device)
         noise = torch.randn_like(state[:batch_size])
         target_velocity = state[None] - noise[:, None]
@@ -174,12 +174,11 @@ class FlowMatching(Model):
         if observation is None:
             weighting = 1.
         else:
-            observation_noise_std = 0.1
             weighting = torch.exp(
                 - 0.5 * reduce(
                     (observation - state)**2,
                     'predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
-                ) / observation_noise_std**2
+                ) / self.observation_std**2
             )
         return reduce(
             weighting * (predicted_velocity - target_velocity)**2,
@@ -187,15 +186,28 @@ class FlowMatching(Model):
         ).mean()
 
     @torch.no_grad
-    def sample(self, current_states, observation, time_step_count=600):
+    def sample(self, current_states, observation, time_step_count=None):
+        time_step_count = time_step_count or self.cfg.sampling_time_step_count
         diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
         time_step_size = diffusion_times[1] - diffusion_times[0]
         state = torch.randn_like(current_states)
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
-            # state = state + time_step_size * self(t_now, state)
-            xdot_now = self(t_now, state)
-            temp = state + time_step_size * xdot_now
-            state = state + time_step_size * (xdot_now + self(t_next, temp)) / 2
-        log.info(reduce(state, 'batch dim -> dim', 'mean'))
+            if self.cfg.sampler is conf.models.Sampler.EULER:
+                state = state + time_step_size * self(t_now, state)
+            elif self.cfg.sampler is conf.models.Sampler.HEUN:
+                xdot_now = self(t_now, state)
+                temp = state + time_step_size * xdot_now
+                state = state + time_step_size * (xdot_now + self(t_next, temp)) / 2
+            else:
+                raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
 
         return state
+
+
+def get_model(cfg, state_dimension, observation_std):
+    if isinstance(cfg, conf.models.ScoreMatching):
+        return ScoreMatching(cfg, state_dimension, observation_std)
+    elif isinstance(cfg, conf.models.FlowMatching):
+        return FlowMatching(cfg, state_dimension, observation_std)
+    else:
+        raise ValueError(f'Unknown model: {cfg}')

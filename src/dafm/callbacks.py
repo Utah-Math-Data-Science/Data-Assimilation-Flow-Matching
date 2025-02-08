@@ -18,7 +18,7 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", *_) -> None:
         super().on_train_epoch_start(trainer)
-        self.train_progress_bar.set_description(f'Time step {trainer.current_epoch}/{self.cfg.time_step_count}, training for {self.cfg.epoch_count} epochs')
+        self.train_progress_bar.set_description(f'Time step {trainer.current_epoch}/{self.cfg.dataset.time_step_count}, training for {self.cfg.model.epoch_count} epochs')
 
 
 class LogStats(pl.callbacks.Callback):
@@ -46,6 +46,7 @@ class SaveTrajectories(pl.callbacks.Callback):
             pl_module.dataset.predicted_states,
             'predicted_state_count dim -> dim', 'mean'
         ))
+        self.log('predicted_state_mean', self.trajectories['predicted_state_mean'][-1], on_epoch=True, prog_bar=True)
         # for i, ps in enumerate(pl_module.dataset.predicted_states):
         #     self.trajectories[f'predicted_state_{i}'].append(ps)
         self.trajectories['observation'].append(self.batch_observation)
