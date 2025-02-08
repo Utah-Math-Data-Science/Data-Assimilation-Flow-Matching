@@ -39,6 +39,7 @@ class DataAssimilation(pl.LightningModule):
         self.optimizer = self.model.get_optimizer(time_step)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
+                    time_step=DataLoader([time_step]),
                     time=DataLoader([time]),
                     predicted_states=DataLoader(predicted_states, batch_size=self.cfg.batch_size, shuffle=self.cfg.shuffle_training_samples),
                     observation=DataLoader([observation]),
@@ -47,13 +48,12 @@ class DataAssimilation(pl.LightningModule):
         }, mode='sequential')
 
     def training_step(self, batch, _):
-        batch, _, epoch = batch
-        batch, batch_idx, _ = batch
+        batch, batch_idx, epoch = utils.unpack_batch(batch)
         self.optimizer.zero_grad()
         loss = self.model.loss(batch['predicted_states'])
         self.manual_backward(loss)
         self.optimizer.step()
-        return {f'loss_train_epoch_{epoch}': loss}
+        return dict(loss=loss)
 
 
 @hydra.main(**utils.HYDRA_INIT)
@@ -77,6 +77,8 @@ def main(cfg):
         deterministic=True,
         callbacks=[
             callbacks.TimeStepProgressBar(cfg),
+            callbacks.LogStats(),
+            callbacks.SaveTrajectories(cfg.run_dir),
         ],
     )
 

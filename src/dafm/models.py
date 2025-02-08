@@ -1,7 +1,12 @@
+import logging
+
 import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange, reduce
+
+
+log = logging.getLogger(__file__)
 
 
 class Identity:
@@ -81,7 +86,7 @@ class Model(nn.Module):
 
 class Score(Model):
     sigma_max = 25
-    eps = 1e-5
+    eps = 1e-3
 
     def forward(self, time, state):
         return super().forward(time, state) / self.sigma(time, self.sigma_max)
@@ -108,12 +113,15 @@ class Score(Model):
             'batch dim -> batch', 'sum'
         ).mean()
 
+    def observation_likelihood_score_damping(self, t):
+        return (1 - 2 * t).clamp(min=0)
+
     @torch.no_grad
     def sample(self, current_states, observation, time_step_count=600):
-        times = torch.linspace(1., self.eps, time_step_count, device=current_states.device)
-        time_step_size = times[0] - times[1]
+        diffusion_times = torch.linspace(1., self.eps, time_step_count, device=current_states.device)
+        time_step_size = diffusion_times[0] - diffusion_times[1]
         state = torch.randn_like(current_states) * self.sigma(torch.ones(1, device=current_states.device), self.sigma_max)
-        for t in times:
+        for t in diffusion_times:
             score = self(t, state)
             # why use mean? like RMSE?
             score_norm = reduce(score**2, 'batch dim -> batch', 'mean').sqrt()
@@ -129,7 +137,7 @@ class Score(Model):
                 # this seems backwards; should it be (observation - state)? because we are given state?
                 observation_score = -(state - observation) / observation_noise_std**2
 
-            score = score + observation_score
+            score = score + observation_score * self.observation_likelihood_score_damping(t)
 
             g = self.sigma_max**t
             state_drift = state + g**2 * score * time_step_size

@@ -29,9 +29,11 @@ class PredictedStatesAndObservation(IterableDataset):
         self.predicted_states = self.true_state + torch.randn((self.predicted_state_count, 1), device=self.cfg.device) * self.predicted_initial_condition_noise_std
         for time_step, t in enumerate(self.times):
             observation = self.make_observation(self.true_state)
+
             yield time_step, t, self.predicted_states, observation
+
+            self.true_state = self.model_dynamics(time_step, t, self.true_state)
             # why no observation of the initial conditions in the first sampling?
             # because we are only allowed to guess the initial conditions, and then hone in our predictions?
             current_states = self.model.sample(self.predicted_states, None if time_step == 0 else observation)
-            self.true_state = self.model_dynamics(time_step, t, self.true_state)
             self.predicted_states = self.model_dynamics(time_step, t, current_states)
