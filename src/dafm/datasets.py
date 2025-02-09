@@ -18,18 +18,18 @@ def euler_maruyama(dt, t, x, f, noise):
 class DoubleWell:
     state_dimension = 1
 
-    def __init__(self, cfg, rng):
+    def __init__(self, cfg, device):
         self.cfg = cfg
-        self.rng = rng
+        self.device = device
 
         self.data = defaultdict(list)
-        self.data['times'] = self.times(cfg, rng)
+        self.data['times'] = self.times(cfg, device)
 
-        for k, state in zip(('true_state', 'predicted_state'), self.initialize_states(cfg, rng)):
+        for k, state in zip(('true_state', 'predicted_state'), self.initialize_states(cfg, device)):
             self.data[k].append(state)
 
         self.times = self.data['times'][:-1]
-        true_state_noise = torch.randn((self.times.shape[0], *self.data['true_state'][0].shape), device=rng.device, generator=rng) * cfg.model_std
+        true_state_noise = torch.randn((self.times.shape[0], *self.data['true_state'][0].shape), device=device) * cfg.model_std
         for time_step, t in enumerate(self.times):
             state = self.data['true_state'][-1]
             if time_step > 0 and time_step % 20 == 0:
@@ -43,19 +43,19 @@ class DoubleWell:
             't dim -> t dim'
         )
 
-        observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=rng.device, generator=rng) * cfg.observation_std
+        observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
         self.data['observation'] = self.data['true_state'] + observation_noise
 
-        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=rng.device, generator=rng)
+        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=device)
 
     @staticmethod
-    def times(cfg, rng):
-        return cfg.time_step_size * torch.arange(cfg.time_step_count, device=rng.device)[:, None]
+    def times(cfg, device):
+        return cfg.time_step_size * torch.arange(cfg.time_step_count, device=device)[:, None]
 
     @staticmethod
-    def initialize_states(cfg, rng):
-        true_state = -1 + torch.randn(1, device=rng.device, generator=rng) * cfg.true_state_initial_condition_std
-        predicted_state = true_state + torch.randn((cfg.predicted_state_count, 1), device=rng.device, generator=rng) * cfg.predicted_state_initial_condition_std
+    def initialize_states(cfg, device):
+        true_state = -1 + torch.randn(1, device=device) * cfg.true_state_initial_condition_std
+        predicted_state = true_state + torch.randn((cfg.predicted_state_count, 1), device=device) * cfg.predicted_state_initial_condition_std
         return true_state, predicted_state
 
     @staticmethod
@@ -99,8 +99,8 @@ class PredictedStatesAndObservation(IterableDataset):
             self.dataset.data['predicted_state'].append(sampled_state)
 
 
-def get_dynamics_dataset(cfg, rng):
+def get_dynamics_dataset(cfg, device):
     if isinstance(cfg, conf.datasets.DoubleWell):
-        return DoubleWell(cfg, rng)
+        return DoubleWell(cfg, device)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

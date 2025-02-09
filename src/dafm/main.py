@@ -83,9 +83,11 @@ def main(cfg):
         ],
     )
 
-    rng = torch.Generator(device=cfg.device).manual_seed(cfg.rng_seed)
-    dynamics = datasets.get_dynamics_dataset(cfg.dataset, rng)
-    model = models.get_model(cfg.model, rng, dynamics.state_dimension, cfg.dataset.observation_std)
+    pl.seed_everything(cfg.rng_seed)
+    with pl.utilities.seed.isolate_rng():
+        dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device)
+    with pl.utilities.seed.isolate_rng():
+        model = models.get_model(cfg.model, dynamics.state_dimension, cfg.dataset.observation_std)
     dataset = datasets.PredictedStatesAndObservation(dynamics, model)
     data_assimilation = DataAssimilation(cfg, dataset, model)
 

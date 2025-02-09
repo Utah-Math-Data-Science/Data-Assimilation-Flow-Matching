@@ -204,7 +204,7 @@ class FlowMatching(Model):
         return state
 
 
-def get_model(cfg, rng, state_dimension, observation_std):
+def get_model(cfg, state_dimension, observation_std):
     if isinstance(cfg, conf.models.ScoreMatching):
         return ScoreMatching(cfg, state_dimension, observation_std)
     elif isinstance(cfg, conf.models.FlowMatching):
