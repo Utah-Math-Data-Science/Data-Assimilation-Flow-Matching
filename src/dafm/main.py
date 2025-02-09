@@ -36,23 +36,22 @@ class DataAssimilation(pl.LightningModule):
             self.dataset_iterable = iter(self.dataset)
 
     def train_dataloader(self):
-        time_step, time, predicted_state, observation = next(self.dataset_iterable)
+        time_step, time, next_predicted_state, next_observation = next(self.dataset_iterable)
         self.optimizer = self.model.get_optimizer(time_step)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
                     time_step=DataLoader([time_step]),
                     time=DataLoader([time]),
-                    predicted_state=DataLoader(predicted_state, batch_size=self.cfg.model.batch_size, shuffle=self.cfg.model.shuffle_training_samples),
-                    observation=DataLoader([observation]),
+                    next_predicted_state=DataLoader(next_predicted_state, batch_size=self.cfg.model.batch_size, shuffle=self.cfg.model.shuffle_training_samples),
+                    next_observation=DataLoader([next_observation]),
             ), mode='max_size_cycle'))
             for epoch in range(self.cfg.model.epoch_count)
         }, mode='sequential')
 
     def training_step(self, batch, _):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
-        observation = None if batch['time_step'] == 0 else batch['observation']
         self.optimizer.zero_grad()
-        loss = self.model.loss(batch['predicted_state'], observation)
+        loss = self.model.loss(batch['next_predicted_state'], batch['next_observation'])
         self.manual_backward(loss)
         self.optimizer.step()
         return dict(loss=loss)

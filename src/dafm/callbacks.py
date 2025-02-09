@@ -33,7 +33,7 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
 class LogStats(pl.callbacks.Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
-        self.log_dict(outputs, on_epoch=True, prog_bar=True, batch_size=batch['predicted_state'].shape[0])
+        self.log_dict(outputs, on_epoch=True, prog_bar=True, batch_size=batch['next_predicted_state'].shape[0])
 
 
 class SaveTrajectories(pl.callbacks.Callback):

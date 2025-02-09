@@ -70,7 +70,7 @@ class DoubleWell:
 
     def __iter__(self):
         for time_step, t in enumerate(self.times):
-            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step]
+            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1]
         self.data['predicted_state'] = rearrange(
             self.data['predicted_state'],
             't predicted_state_count dim -> t predicted_state_count dim'
@@ -83,21 +83,20 @@ class PredictedStatesAndObservation(IterableDataset):
         self.model = model
 
     def __iter__(self):
-        for time_step, t, predicted_state, observation in self.dataset:
-            yield time_step, t, predicted_state, observation
-            # why no observation of the initial conditions in the first sampling?
-            # because we are only allowed to guess the initial conditions, and then hone in our predictions?
-            sampled_state = self.model.sample(predicted_state, None if time_step == 0 else observation)
-            log.info('sampled_state mean: %s', reduce(
-                sampled_state,
-                'predicted_state_count dim ->', 'mean'
-            ).item())
-            next_predicted_state = self.dataset.predict(time_step, t, sampled_state)
+        # this does not train the model on the initial conditions
+        for time_step, t, predicted_state, next_observation in self.dataset:
+            next_predicted_state = self.dataset.predict(time_step, t, predicted_state)
             log.info('next_predicted_state mean: %s', reduce(
                 next_predicted_state,
                 'predicted_state_count dim ->', 'mean'
             ).item())
-            self.dataset.data['predicted_state'].append(next_predicted_state)
+            yield time_step, t, next_predicted_state, next_observation
+            sampled_state = self.model.sample(next_predicted_state, next_observation)
+            log.info('sampled_state mean: %s', reduce(
+                sampled_state,
+                'predicted_state_count dim ->', 'mean'
+            ).item())
+            self.dataset.data['predicted_state'].append(sampled_state)
 
 
 def get_dynamics_dataset(cfg, rng):
