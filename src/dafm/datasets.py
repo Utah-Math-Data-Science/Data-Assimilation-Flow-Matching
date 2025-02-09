@@ -50,7 +50,8 @@ class DoubleWell:
 
     @staticmethod
     def times(cfg, device):
-        return cfg.time_step_size * torch.arange(cfg.time_step_count, device=device)[:, None]
+        # number of time steps after the initial condition at time step zero
+        return cfg.time_step_size * torch.arange(cfg.time_step_count + 1, device=device)[:, None]
 
     @staticmethod
     def initialize_states(cfg, device):
@@ -83,14 +84,19 @@ class PredictedStatesAndObservation(IterableDataset):
         self.model = model
 
     def __iter__(self):
-        # this does not train the model on the initial conditions
+        if self.model.cfg.train_on_initial_predicted_state:
+            for _, (time_step, t, predicted_state, next_observation) in zip(range(1), self.dataset):
+                yield time_step, t, predicted_state, next_observation, True
+                if self.model.cfg.resample_initial_predicted_state:
+                    sampled_state = self.model.sample(predicted_state, None)
+                    self.dataset.data['predicted_state'][0] = sampled_state
         for time_step, t, predicted_state, next_observation in self.dataset:
             next_predicted_state = self.dataset.predict(time_step, t, predicted_state)
             log.info('next_predicted_state mean: %s', reduce(
                 next_predicted_state,
                 'predicted_state_count dim ->', 'mean'
             ).item())
-            yield time_step, t, next_predicted_state, next_observation
+            yield time_step, t, next_predicted_state, next_observation, False
             sampled_state = self.model.sample(next_predicted_state, next_observation)
             log.info('sampled_state mean: %s', reduce(
                 sampled_state,

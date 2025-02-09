@@ -25,9 +25,19 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
         items.pop('v_num', None)
         return items
 
+    def _get_current_time_step_of_estimation(self, trainer):
+        if self.cfg.model.train_on_initial_predicted_state:
+            return trainer.current_epoch
+        else:
+            return trainer.current_epoch + 1
+
     def on_train_epoch_start(self, trainer: "pl.Trainer", *_) -> None:
-        super().on_train_epoch_start(trainer)
-        self.train_progress_bar.set_description(f'Time step {trainer.current_epoch}/{self.cfg.dataset.time_step_count}, training for {self.cfg.model.epoch_count} epochs')
+        time_step_to_estimate = self._get_current_time_step_of_estimation(trainer)
+        if self.cfg.model.train_on_initial_predicted_state and trainer.current_epoch == 0:
+            estimation_message = f'Training on initial predicted state without observation at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
+        else:
+            estimation_message = f'Estimating state for time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
+        self.train_progress_bar.set_description(f'{estimation_message}, training for {self.cfg.model.epoch_count} epochs')
 
 
 class LogStats(pl.callbacks.Callback):

@@ -17,6 +17,9 @@ class Trainable(Model):
     residual_block_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=2)
     use_batch_norm: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
+    train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+
 
 class Sampler(enum.Enum):
     EULER = enum.auto()
