@@ -8,6 +8,8 @@
             "name": "Launch main",
             "program": "/root/workspace/GitHub/Data-Assimilation-Flow-Matching/src/dafm/main.py",
             "args": [
+                "model=FlowMatching",
+                "dataset=DoubleWell"
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "${input:gpu}"

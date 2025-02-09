@@ -28,7 +28,7 @@ class Conf(orm.Table):
     device: str = field(default='cuda')
 
     alt_id: str = orm.make_field(orm.ColumnRequired(sa.String(8), index=True, unique=True), init=False, omegaconf_ignore=True)
-    rng_seed: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=42)
+    rng_seed: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=2376999025)
     fit: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
     dataset = orm.OneToManyField(datasets.Dataset, required=True, default=omegaconf.MISSING)

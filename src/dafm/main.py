@@ -36,13 +36,13 @@ class DataAssimilation(pl.LightningModule):
             self.dataset_iterable = iter(self.dataset)
 
     def train_dataloader(self):
-        time_step, time, predicted_states, observation = next(self.dataset_iterable)
+        time_step, time, predicted_state, observation = next(self.dataset_iterable)
         self.optimizer = self.model.get_optimizer(time_step)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
                     time_step=DataLoader([time_step]),
                     time=DataLoader([time]),
-                    predicted_states=DataLoader(predicted_states, batch_size=self.cfg.model.batch_size, shuffle=self.cfg.model.shuffle_training_samples),
+                    predicted_state=DataLoader(predicted_state, batch_size=self.cfg.model.batch_size, shuffle=self.cfg.model.shuffle_training_samples),
                     observation=DataLoader([observation]),
             ), mode='max_size_cycle'))
             for epoch in range(self.cfg.model.epoch_count)
@@ -52,7 +52,7 @@ class DataAssimilation(pl.LightningModule):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
         observation = None if batch['time_step'] == 0 else batch['observation']
         self.optimizer.zero_grad()
-        loss = self.model.loss(batch['predicted_states'], observation)
+        loss = self.model.loss(batch['predicted_state'], observation)
         self.manual_backward(loss)
         self.optimizer.step()
         return dict(loss=loss)
@@ -80,13 +80,14 @@ def main(cfg):
         callbacks=[
             callbacks.TimeStepProgressBar(cfg),
             callbacks.LogStats(),
-            callbacks.SaveTrajectories(cfg.run_dir),
+            callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
         ],
     )
 
-    dynamics = datasets.get_dynamics_dataset(cfg.dataset)
-    model = models.get_model(cfg.model, dynamics.state_dimension, cfg.dataset.observation_std)
-    dataset = datasets.PredictedStatesAndObservation(dynamics, model, cfg.device)
+    rng = torch.Generator(device=cfg.device).manual_seed(cfg.rng_seed)
+    dynamics = datasets.get_dynamics_dataset(cfg.dataset, rng)
+    model = models.get_model(cfg.model, rng, dynamics.state_dimension, cfg.dataset.observation_std)
+    dataset = datasets.PredictedStatesAndObservation(dynamics, model)
     data_assimilation = DataAssimilation(cfg, dataset, model)
 
     trainer.fit(data_assimilation)

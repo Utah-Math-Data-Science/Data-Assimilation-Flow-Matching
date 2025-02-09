@@ -1,5 +1,7 @@
+from collections import defaultdict
 import logging
 
+from einops import rearrange, reduce
 import torch
 from torch.utils.data.dataset import IterableDataset
 
@@ -9,52 +11,97 @@ import conf.datasets
 log = logging.getLogger(__file__)
 
 
+def euler_maruyama(dt, t, x, f, noise):
+    return x + dt * f(t, x) + noise * dt**(1/2)
+
+
 class DoubleWell:
     state_dimension = 1
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, rng):
         self.cfg = cfg
+        self.rng = rng
 
-    def times(self):
-        return self.cfg.time_step_size * torch.arange(self.cfg.time_step_count)[:, None]
+        self.data = defaultdict(list)
+        self.data['times'] = self.times(cfg, rng)
 
-    def initialize_states(self):
-        true_state = -1 + torch.randn(1) * self.cfg.true_state_initial_condition_std
-        predicted_states = true_state + torch.randn((self.cfg.predicted_state_count, 1)) * self.cfg.predicted_state_initial_condition_std
-        return true_state, predicted_states
+        for k, state in zip(('true_state', 'predicted_state'), self.initialize_states(cfg, rng)):
+            self.data[k].append(state)
 
-    def dynamics(self, time_step, t, x, is_predicted_state=True):
-        if time_step > 0 and (time_step + 1) % 20 == 0:
-            x = -x
-        # why is the noise coefficient 1 here when is_predicted_state is True?
-        noise_coefficient = 1 if is_predicted_state else self.cfg.model_std
-        return x - 4 * x * (x**2 - 1) * self.cfg.time_step_size + noise_coefficient * torch.randn(x.shape, device=x.device) * (self.cfg.time_step_size)**(1/2)
+        self.times = self.data['times'][:-1]
+        true_state_noise = torch.randn((self.times.shape[0], *self.data['true_state'][0].shape), device=rng.device, generator=rng) * cfg.model_std
+        for time_step, t in enumerate(self.times):
+            state = self.data['true_state'][-1]
+            if time_step > 0 and time_step % 20 == 0:
+                state = -state
+            next_state = euler_maruyama(
+                cfg.time_step_size, t, state, self.dynamics, true_state_noise[time_step]
+            )
+            self.data['true_state'].append(next_state)
+        self.data['true_state'] = rearrange(
+            self.data['true_state'],
+            't dim -> t dim'
+        )
 
-    def observe(self, true_state):
-        return true_state + torch.randn_like(true_state) * self.cfg.observation_std
+        observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=rng.device, generator=rng) * cfg.observation_std
+        self.data['observation'] = self.data['true_state'] + observation_noise
+
+        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=rng.device, generator=rng)
+
+    @staticmethod
+    def times(cfg, rng):
+        return cfg.time_step_size * torch.arange(cfg.time_step_count, device=rng.device)[:, None]
+
+    @staticmethod
+    def initialize_states(cfg, rng):
+        true_state = -1 + torch.randn(1, device=rng.device, generator=rng) * cfg.true_state_initial_condition_std
+        predicted_state = true_state + torch.randn((cfg.predicted_state_count, 1), device=rng.device, generator=rng) * cfg.predicted_state_initial_condition_std
+        return true_state, predicted_state
+
+    @staticmethod
+    def dynamics(t, x):
+        return -4 * x * (x**2 - 1)
+
+    def predict(self, time_step, t, sampled_state):
+        next_predicted_state = euler_maruyama(
+            self.cfg.time_step_size, t, sampled_state, self.dynamics, self.predicted_state_noise[time_step]
+        )
+        return next_predicted_state
+
+    def __iter__(self):
+        for time_step, t in enumerate(self.times):
+            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step]
+        self.data['predicted_state'] = rearrange(
+            self.data['predicted_state'],
+            't predicted_state_count dim -> t predicted_state_count dim'
+        )
 
 
 class PredictedStatesAndObservation(IterableDataset):
-    def __init__(self, dataset, model, device):
+    def __init__(self, dataset, model):
         self.dataset = dataset
         self.model = model
-        self.device = device
-        self.times = dataset.times().to(device)
 
     def __iter__(self):
-        self.true_state, self.predicted_states = map(lambda x: x.to(self.device), self.dataset.initialize_states())
-        for time_step, t in enumerate(self.times):
-            observation = self.dataset.observe(self.true_state)
-            yield time_step, t, self.predicted_states, observation
-            self.true_state = self.dataset.dynamics(time_step, t, self.true_state, is_predicted_state=False)
+        for time_step, t, predicted_state, observation in self.dataset:
+            yield time_step, t, predicted_state, observation
             # why no observation of the initial conditions in the first sampling?
             # because we are only allowed to guess the initial conditions, and then hone in our predictions?
-            current_states = self.model.sample(self.predicted_states, None if time_step == 0 else observation)
-            self.predicted_states = self.dataset.dynamics(time_step, t, current_states)
+            sampled_state = self.model.sample(predicted_state, None if time_step == 0 else observation)
+            log.info('sampled_state mean: %s', reduce(
+                sampled_state,
+                'predicted_state_count dim ->', 'mean'
+            ).item())
+            next_predicted_state = self.dataset.predict(time_step, t, sampled_state)
+            log.info('next_predicted_state mean: %s', reduce(
+                next_predicted_state,
+                'predicted_state_count dim ->', 'mean'
+            ).item())
+            self.dataset.data['predicted_state'].append(next_predicted_state)
 
 
-def get_dynamics_dataset(cfg):
+def get_dynamics_dataset(cfg, rng):
     if isinstance(cfg, conf.datasets.DoubleWell):
-        return DoubleWell(cfg)
+        return DoubleWell(cfg, rng)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

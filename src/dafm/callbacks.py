@@ -1,10 +1,13 @@
-from collections import defaultdict
+import logging
 
 from einops import rearrange, reduce
 import lightning.pytorch as pl
 import pandas as pd
 
 from dafm import utils
+
+
+log = logging.getLogger(__file__)
 
 
 class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
@@ -16,6 +19,12 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
         super().__init__(*args, **kwargs)
         self.cfg = cfg
 
+    def get_metrics(self, trainer, model):
+        # don't show the version number
+        items = super().get_metrics(trainer, model)
+        items.pop('v_num', None)
+        return items
+
     def on_train_epoch_start(self, trainer: "pl.Trainer", *_) -> None:
         super().on_train_epoch_start(trainer)
         self.train_progress_bar.set_description(f'Time step {trainer.current_epoch}/{self.cfg.dataset.time_step_count}, training for {self.cfg.model.epoch_count} epochs')
@@ -24,36 +33,32 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
 class LogStats(pl.callbacks.Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
-        self.log_dict(outputs, on_epoch=True, prog_bar=True, batch_size=batch['predicted_states'].shape[0])
+        self.log_dict(outputs, on_epoch=True, prog_bar=True, batch_size=batch['predicted_state'].shape[0])
 
 
 class SaveTrajectories(pl.callbacks.Callback):
-    def __init__(self, save_dir):
-        self.save_dir = save_dir
-        self.trajectories = defaultdict(list)
+    def __init__(self, save_path):
+        self.save_path = save_path
 
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        batch, batch_idx, epoch = utils.unpack_batch(batch)
-        self.batch_time = batch['time'][0]
-        assert self.batch_time.shape == (1,)
-        self.batch_observation = batch['observation'][0]
-        assert self.batch_observation.shape == (1,)
-
-    def on_train_epoch_end(self, trainer, pl_module):
-        self.trajectories['time'].append(self.batch_time)
-        self.trajectories['true_state'].append(pl_module.dataset.true_state)
-        self.trajectories['predicted_state_mean'].append(reduce(
-            pl_module.dataset.predicted_states,
-            'predicted_state_count dim -> dim', 'mean'
-        ))
-        self.log('predicted_state_mean', self.trajectories['predicted_state_mean'][-1], on_epoch=True, prog_bar=True)
-        # for i, ps in enumerate(pl_module.dataset.predicted_states):
-        #     self.trajectories[f'predicted_state_{i}'].append(ps)
-        self.trajectories['observation'].append(self.batch_observation)
+    def on_train_epoch_start(self, trainer, pl_module):
+        self.log('predicted_state_mean', reduce(
+            pl_module.dataset.dataset.data['predicted_state'][-1],
+            'predicted_state_count dim ->', 'mean'
+        ), on_epoch=True, prog_bar=True)
 
     def on_exception(self, trainer, pl_module, exception):
         self.on_train_end(trainer, pl_module)
 
     def on_train_end(self, trainer, pl_module):
-        df = pd.DataFrame({k: rearrange(v, 't dim -> (t dim)').cpu().numpy() for k, v in self.trajectories.items()})
-        df.to_parquet(self.save_dir/'trajectories.parquet')
+        data = pl_module.dataset.dataset.data.copy()
+        data['predicted_state_mean'] = reduce(
+            data['predicted_state'],
+            't predicted_state_count dim -> t dim', 'mean'
+        )
+        del data['predicted_state']
+        df = pd.concat([
+            pd.Series(rearrange(v, 't dim -> (t dim)').cpu().numpy(), name=k)
+            for k, v in data.items()
+        ], axis=1)
+        df.to_parquet(self.save_path)
+        log.info('Trajectory data saved to %s', self.save_path)
