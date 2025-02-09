@@ -32,6 +32,7 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
             return trainer.current_epoch + 1
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", *_) -> None:
+        super().on_train_epoch_start(trainer)
         time_step_to_estimate = self._get_current_time_step_of_estimation(trainer)
         if self.cfg.model.train_on_initial_predicted_state and trainer.current_epoch == 0:
             estimation_message = f'Training on initial predicted state without observation at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'

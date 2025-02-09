@@ -74,8 +74,8 @@ def main(cfg):
 
     trainer = pl.Trainer(
         logger=logger,
-        max_epochs=-1,
-        check_val_every_n_epoch=cfg.dataset.time_step_count * 2,  # never validate
+        max_epochs=cfg.model.epoch_count,
+        check_val_every_n_epoch=cfg.model.epoch_count,
         reload_dataloaders_every_n_epochs=1,
         deterministic=True,
         callbacks=[
