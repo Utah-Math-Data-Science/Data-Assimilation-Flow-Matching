@@ -37,7 +37,8 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
         if self.cfg.model.train_on_initial_predicted_state and trainer.current_epoch == 0:
             estimation_message = f'Training on initial predicted state without observation at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
         else:
-            estimation_message = f'Estimating state for time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
+            ignore_observations_text = ' without observation' if self.cfg.model.ignore_observations else ''
+            estimation_message = f'Estimating state{ignore_observations_text} for time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
         self.train_progress_bar.set_description(f'{estimation_message}, training for {self.cfg.model.epoch_count} epochs')
 
 

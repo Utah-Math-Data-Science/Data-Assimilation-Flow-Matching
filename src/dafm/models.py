@@ -132,7 +132,7 @@ class ScoreMatching(Model):
             score_rescaling[score_norm > norm_max] = norm_max / score_rescaling[score_norm > norm_max]
             score = score * score_rescaling
 
-            if observation is None:
+            if observation is None or self.cfg.ignore_observations:
                 observation_score = 0.
             else:
                 # this seems backwards; should it be (observation - state)? because we are given state?
@@ -171,7 +171,7 @@ class FlowMatching(Model):
             '(batch predicted_state_count) dim -> batch predicted_state_count dim',
             batch=batch_size
         )
-        if observation is None:
+        if observation is None or self.cfg.ignore_observations:
             weighting = 1.
         else:
             weighting = torch.exp(

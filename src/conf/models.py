@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 class Model(orm.InheritableTable):
-    pass
+    ignore_observations: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class Trainable(Model):
