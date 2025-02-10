@@ -92,8 +92,12 @@ class ScoreMatching(Model):
     def forward(self, time, state):
         return super().forward(time, state) / self.sigma(time, self.cfg.sigma_max)
 
-    def get_optimizer(self, time_step):
-        lr = 0.005 if time_step == 0 else 0.01
+    def get_optimizer(self, time_step, ignore_observation):
+        if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
+            lr = 5e-3
+        else:
+            lr = 1e-2
+        log.info('Learning rate: %.4f', lr)
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def sigma(self, t, sigma):
@@ -152,8 +156,11 @@ class FlowMatching(Model):
     def forward(self, time, state):
         return super().forward(time, state)
 
-    def get_optimizer(self, time_step):
-        lr = 0.005 if time_step == 0 else 0.01
+    def get_optimizer(self, time_step, ignore_observation):
+        if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
+            lr = 5e-3
+        else:
+            lr = 1e-2
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def loss(self, state, observation):

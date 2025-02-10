@@ -37,7 +37,7 @@ class DataAssimilation(pl.LightningModule):
 
     def train_dataloader(self):
         time_step, time, next_predicted_state, next_observation, ignore_observation = next(self.dataset_iterable)
-        self.optimizer = self.model.get_optimizer(time_step)
+        self.optimizer = self.model.get_optimizer(time_step, ignore_observation)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
                     time_step=DataLoader([time_step]),
