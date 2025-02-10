@@ -97,7 +97,6 @@ class ScoreMatching(Model):
             lr = 5e-3
         else:
             lr = 1e-2
-        log.info('Learning rate: %.4f', lr)
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def sigma(self, t, sigma):
