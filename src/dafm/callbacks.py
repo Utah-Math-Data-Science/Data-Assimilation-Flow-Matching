@@ -63,14 +63,34 @@ class SaveTrajectories(pl.callbacks.Callback):
 
     def on_train_end(self, trainer, pl_module):
         data = pl_module.dataset.dataset.data.copy()
-        data['predicted_state_mean'] = reduce(
+        data['predicted_state'] = rearrange(
             data['predicted_state'],
-            't predicted_state_count dim -> t dim', 'mean'
+            't predicted_state_count dim -> t predicted_state_count dim'
         )
-        del data['predicted_state']
-        df = pd.concat([
-            pd.Series(rearrange(v, 't dim -> (t dim)').cpu().numpy(), name=k)
-            for k, v in data.items()
-        ], axis=1)
+        _, predicted_state_count, dim = data['predicted_state'].shape
+        data['predicted_state'] = rearrange(
+            data['predicted_state'],
+            't predicted_state_count dim -> t (predicted_state_count dim)'
+        )
+        data['predicted_state'] = pd.DataFrame(
+            data['predicted_state'].cpu().numpy(),
+            index=range(data['predicted_state'].shape[0]),
+            columns=[
+                f'predicted_state_{state}_dim_{d}'
+                for state in range(predicted_state_count)
+                for d in range(dim)
+            ],
+        )
+        data['true_state'] = pd.DataFrame(
+            data['true_state'].cpu().numpy(),
+            index=range(data['true_state'].shape[0]),
+            columns=[f'true_state_dim_{d}' for d in range(dim)],
+        )
+        data['times'] = pd.DataFrame(
+            data['times'].cpu().numpy(),
+            index=range(data['times'].shape[0]),
+            columns=['times'],
+        )
+        df = pd.concat([data[k] for k in ('times', 'true_state', 'predicted_state')], axis=1)
         df.to_parquet(self.save_path)
         log.info('Trajectory data saved to %s', self.save_path)
