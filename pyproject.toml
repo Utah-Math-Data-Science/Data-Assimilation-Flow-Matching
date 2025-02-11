@@ -10,6 +10,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "debugpy>=1.8.12",
+    "duckdb>=1.2.0",
     "einops>=0.8.0",
     "hydra-core>=1.3.2",
     "hydra-orm>=0.1.0",
