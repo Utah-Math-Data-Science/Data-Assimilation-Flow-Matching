@@ -180,12 +180,14 @@ class FlowMatching(Model):
         if observation is None or self.cfg.ignore_observations:
             weighting = 1.
         else:
-            weighting = torch.exp(
-                - 0.5 * reduce(
-                    (observation - state)**2,
-                    'predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
-                ) / self.observation_std**2
-            )
+            weighting_argument = -0.5 * reduce(
+                (observation - state)**2,
+                'predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
+            ) / self.observation_std**2
+            if self.cfg.softmax_loss_weighting:
+                weighting = torch.softmax(weighting_argument, dim=1)
+            else:
+                weighting = torch.exp(weighting_argument)
         return reduce(
             weighting * (predicted_velocity - target_velocity)**2,
             'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
