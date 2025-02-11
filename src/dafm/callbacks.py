@@ -86,11 +86,16 @@ class SaveTrajectories(pl.callbacks.Callback):
             index=range(data['true_state'].shape[0]),
             columns=[f'true_state_dim_{d}' for d in range(dim)],
         )
+        data['observation'] = pd.DataFrame(
+            data['observation'].cpu().numpy(),
+            index=range(data['observation'].shape[0]),
+            columns=[f'observation_dim_{d}' for d in range(dim)],
+        )
         data['times'] = pd.DataFrame(
             data['times'].cpu().numpy(),
             index=range(data['times'].shape[0]),
             columns=['times'],
         )
-        df = pd.concat([data[k] for k in ('times', 'true_state', 'predicted_state')], axis=1)
+        df = pd.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], axis=1)
         df.to_parquet(self.save_path)
         log.info('Trajectory data saved to %s', self.save_path)
