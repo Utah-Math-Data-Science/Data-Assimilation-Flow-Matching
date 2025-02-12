@@ -179,6 +179,10 @@ class FlowMatching(Model):
         )
         if observation is None or self.cfg.ignore_observations:
             weighting = 1.
+            return reduce(
+                weighting * (predicted_velocity - target_velocity)**2,
+                'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
+            ).mean()
         else:
             weighting_argument = -0.5 * reduce(
                 (observation - state)**2,
@@ -188,10 +192,10 @@ class FlowMatching(Model):
                 weighting = torch.softmax(weighting_argument, dim=1)
             else:
                 weighting = torch.exp(weighting_argument)
-        return reduce(
-            weighting * (predicted_velocity - target_velocity)**2,
-            'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
-        ).mean()
+            return reduce(
+                weighting * (predicted_velocity - target_velocity)**2,
+                'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
+            ).sum(1).mean()
 
     @torch.no_grad
     def sample(self, current_states, observation, time_step_count=None):
