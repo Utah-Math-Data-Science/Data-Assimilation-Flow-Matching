@@ -218,23 +218,45 @@ class FlowMatching(Model):
                 'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
             ).sum(1).mean()
 
+    def observation_likelihood_vector_field_damping(self, t):
+        return t
+        return 1.
+
     @torch.no_grad
     def sample(self, current_states, observation, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
         diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
         time_step_size = diffusion_times[1] - diffusion_times[0]
         state = torch.randn_like(current_states)
+        if (
+            self.cfg.sampling_use_observation_likelihood
+            and observation is not None
+            and not self.cfg.ignore_observations
+        ):
+            dot_state = lambda t, x: (
+                self(t, x)
+                + self.observation_likelihood_vector_field_damping(t) * (
+                    (observation - x) / (1 - t)
+                )
+            ) / 2
+        else:
+            dot_state = self
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
             if self.cfg.sampler is conf.models.Sampler.EULER:
-                state = state + time_step_size * self(t_now, state)
+                state = state + time_step_size * dot_state(t_now, state)
             elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
                 raise NotImplementedError()
                 state_drift = state + time_step_size * self(t_now, state)
                 state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
             elif self.cfg.sampler is conf.models.Sampler.HEUN:
-                xdot_now = self(t_now, state)
+                if self.cfg.sampling_use_observation_likelihood:
+                    raise ValueError(
+                        'Using the observation likelihood vector field does not work with the Heun sampler yet.'
+                        ' Please use a different sampler (e.g., set model.sampler=EULER), or set model.sampleing_use_observation_likelihood=false.'
+                    )
+                xdot_now = dot_state(t_now, state)
                 temp = state + time_step_size * xdot_now
-                state = state + time_step_size * (xdot_now + self(t_next, temp)) / 2
+                state = state + time_step_size * (xdot_now + dot_state(t_next, temp)) / 2
             else:
                 raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
 
