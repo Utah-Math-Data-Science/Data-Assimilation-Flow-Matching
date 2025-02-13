@@ -90,7 +90,7 @@ class Model(nn.Module):
 
 class ScoreMatching(Model):
     def forward(self, time, state):
-        return super().forward(time, state) / self.sigma(time, self.cfg.sigma_max)
+        return super().forward(time, state) / self.sigma(time)
 
     def get_optimizer(self, time_step, ignore_observation):
         if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
@@ -99,17 +99,28 @@ class ScoreMatching(Model):
             lr = 1e-2
         return torch.optim.Adam(self.parameters(), lr=lr)
 
-    def sigma(self, t, sigma):
-        return (
-            (sigma**(2 * t) - 1)
+    def sigma(self, t):
+        """
+        Eqn.(30) of [1]_ modified to be continuous as t -> 0.
+        But, we divide by 2*log(sigma_max/sigma_min)? Why?
+
+        References
+        ----------
+        .. [1] Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., & Poole, B. (2021).
+           Score-Based Generative Modeling through Stochastic Differential Equations
+           (No. arXiv:2011.13456). arXiv. http://arxiv.org/abs/2011.13456
+        """
+        return self.cfg.sigma_min * (
+            ((self.cfg.sigma_max / self.cfg.sigma_min)**(2 * t) - 1)
             / 2
-            / np.log(sigma)
+            / np.log(self.cfg.sigma_max / self.cfg.sigma_min)
         )**(1/2)
 
     def loss(self, state, observation):
+        # diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - 1e-5) + 1e-5
         diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.time_min) + self.cfg.time_min
         noise = torch.randn_like(state)
-        std = self.sigma(diffusion_time, self.cfg.sigma_max)
+        std = self.sigma(diffusion_time)
         noised_state = state + noise * std
         predicted_score = self(diffusion_time, noised_state)
         return reduce(
@@ -124,8 +135,8 @@ class ScoreMatching(Model):
     def sample(self, current_states, observation, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
         diffusion_times = torch.linspace(1., self.cfg.time_min, time_step_count, device=current_states.device)
-        time_step_size = diffusion_times[0] - diffusion_times[1]
-        state = torch.randn_like(current_states) * self.sigma(1, self.cfg.sigma_max)
+        minus_time_step_size = diffusion_times[1] - diffusion_times[0]
+        state = torch.randn_like(current_states) * self.sigma(1)
         for t in diffusion_times[:-1]:
             score = self(t, state)
             # why use mean? like RMSE?
@@ -143,12 +154,22 @@ class ScoreMatching(Model):
 
             score = score + observation_score * self.observation_likelihood_score_damping(t)
 
-            g = self.cfg.sigma_max**t
-            state_drift = state + g**2 * score * time_step_size
-            state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
+            # why not use self.sigma here?
+            g = self.cfg.sigma_min * (self.cfg.sigma_max / self.cfg.sigma_min)**t
+            if self.cfg.sampler is conf.models.Sampler.EULER:
+                state = state - g**2 * score * minus_time_step_size
+                state_out = state
+            elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+                state_drift = state - g**2 * score * minus_time_step_size
+                state = state_drift + g * torch.randn_like(state) * minus_time_step_size.abs().sqrt()
+                state_out = state_drift
+            else:
+                raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
 
         # no noise in final step
-        return state_drift
+        # maybe this is done to handle the discontinuity of the variance exploding path as t -> 0.
+        # just use the mean of the noise distribution for the last step
+        return state_out
 
 
 class FlowMatching(Model):
@@ -206,6 +227,10 @@ class FlowMatching(Model):
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 state = state + time_step_size * self(t_now, state)
+            elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+                raise NotImplementedError()
+                state_drift = state + time_step_size * self(t_now, state)
+                state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
             elif self.cfg.sampler is conf.models.Sampler.HEUN:
                 xdot_now = self(t_now, state)
                 temp = state + time_step_size * xdot_now

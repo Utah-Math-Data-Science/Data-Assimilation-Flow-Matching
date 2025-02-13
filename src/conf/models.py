@@ -17,7 +17,7 @@ class Trainable(Model):
     residual_block_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=2)
     use_batch_norm: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
-    train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
 
@@ -29,6 +29,7 @@ class Sampler(enum.Enum):
 
 class ScoreMatching(Trainable):
     time_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-3)
+    sigma_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)
     sigma_max: float = orm.make_field(orm.ColumnRequired(sa.Double), default=25.0)
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
