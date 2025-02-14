@@ -7,7 +7,7 @@ import omegaconf
 import hydra_orm.utils
 from hydra_orm import orm
 
-from conf import datasets, models
+from conf import datasets, models, diffusion_path
 from dafm import utils
 
 
@@ -48,3 +48,5 @@ orm.store_config(Conf)
 orm.store_config(datasets.DoubleWell, group=Conf.dataset.key)
 orm.store_config(models.ScoreMatching, group=Conf.model.key)
 orm.store_config(models.FlowMatching, group=Conf.model.key)
+orm.store_config(diffusion_path.ConditionalOptimalTransport, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')
+orm.store_config(diffusion_path.VarianceExploding, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')

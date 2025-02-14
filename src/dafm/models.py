@@ -6,6 +6,7 @@ import torch.nn as nn
 from einops import rearrange, reduce, repeat
 
 import conf.models
+import conf.diffusion_path
 
 
 log = logging.getLogger(__file__)
@@ -110,15 +111,15 @@ class ScoreMatching(Model):
            Score-Based Generative Modeling through Stochastic Differential Equations
            (No. arXiv:2011.13456). arXiv. http://arxiv.org/abs/2011.13456
         """
-        return self.cfg.sigma_min * (
-            ((self.cfg.sigma_max / self.cfg.sigma_min)**(2 * t) - 1)
+        return self.cfg.diffusion_path.sigma_min * (
+            ((self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**(2 * t) - 1)
             / 2
-            / np.log(self.cfg.sigma_max / self.cfg.sigma_min)
+            / np.log(self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)
         )**(1/2)
 
     def loss(self, state, observation):
         # diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - 1e-5) + 1e-5
-        diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.time_min) + self.cfg.time_min
+        diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
         noise = torch.randn_like(state)
         std = self.sigma(diffusion_time)
         noised_state = state + noise * std
@@ -134,7 +135,7 @@ class ScoreMatching(Model):
     @torch.no_grad
     def sample(self, current_states, observation, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
-        diffusion_times = torch.linspace(1., self.cfg.time_min, time_step_count, device=current_states.device)
+        diffusion_times = torch.linspace(1., self.cfg.diffusion_path.time_min, time_step_count, device=current_states.device)
         minus_time_step_size = diffusion_times[1] - diffusion_times[0]
         state = torch.randn_like(current_states) * self.sigma(1)
         for t in diffusion_times[:-1]:
@@ -155,7 +156,7 @@ class ScoreMatching(Model):
             score = score + observation_score * self.observation_likelihood_score_damping(t)
 
             # why not use self.sigma here?
-            g = self.cfg.sigma_min * (self.cfg.sigma_max / self.cfg.sigma_min)**t
+            g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**t
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 state = state - g**2 * score * minus_time_step_size
                 state_out = state
@@ -183,15 +184,57 @@ class FlowMatching(Model):
             lr = 1e-2
         return torch.optim.Adam(self.parameters(), lr=lr)
 
+    def sigma(self, t):
+        """
+        Eqn.(30) of [1]_ modified to be continuous as t -> 0.
+        But, we divide by 2*log(sigma_max/sigma_min)? Why?
+
+        References
+        ----------
+        .. [1] Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., & Poole, B. (2021).
+           Score-Based Generative Modeling through Stochastic Differential Equations
+           (No. arXiv:2011.13456). arXiv. http://arxiv.org/abs/2011.13456
+        """
+        return self.cfg.diffusion_path.sigma_min * (
+            ((self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**(2 * t) - 1)
+            / 2
+            / np.log(self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)
+        )**(1/2)
+
+    def dsigma(self, t):
+        return self.cfg.diffusion_path.sigma_min * (
+            self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min
+        )**(2 * t) / (
+            ((self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**(2 * t) - 1)
+            * 2
+            / np.log(self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)
+        )**(1/2)
+
     def loss(self, state, observation):
         batch_size = self.cfg.loss_sample_count
-        diffusion_time = torch.rand((batch_size, 1), device=state.device)
         noise = torch.randn_like(state[:batch_size])
-        target_velocity = state[None] - noise[:, None]
-        noise_flowed_to_t = rearrange(
-            (diffusion_time * state)[None] + ((1 - diffusion_time) * noise)[:, None],
-            'batch predicted_state_count dim -> (batch predicted_state_count) dim'
-        )
+        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            diffusion_time = torch.rand((batch_size, 1), device=state.device)
+            noise_flowed_to_t = rearrange(
+                (diffusion_time * state)[None] + ((1 - diffusion_time) * noise)[:, None],
+                'batch predicted_state_count dim -> (batch predicted_state_count) dim'
+            )
+            target_velocity = state[None] - noise[:, None]
+            diffusion_path_weighting = 1.
+        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+            std = self.sigma(1 - diffusion_time)
+            noise_flowed_to_t = state[None] + (std * noise)[:, None]
+            dt_std = self.dsigma(1 - diffusion_time)
+            dx_target_velocity = -dt_std / std
+            target_velocity = dx_target_velocity[:, None] * (
+                noise_flowed_to_t - state[None]
+            )
+            noise_flowed_to_t = rearrange(
+                noise_flowed_to_t,
+                'batch predicted_state_count dim -> (batch predicted_state_count) dim'
+            )
+            diffusion_path_weighting = 1 / dt_std**2
         diffusion_time = repeat(diffusion_time, 'batch dim -> (repeat batch) dim', repeat=batch_size)
         predicted_velocity = rearrange(
             self(diffusion_time, noise_flowed_to_t),
@@ -201,7 +244,7 @@ class FlowMatching(Model):
         if observation is None or self.cfg.ignore_observations:
             weighting = 1.
             return reduce(
-                weighting * (predicted_velocity - target_velocity)**2,
+                weighting * diffusion_path_weighting * (predicted_velocity - target_velocity)**2,
                 'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
             ).mean()
         else:
@@ -214,7 +257,7 @@ class FlowMatching(Model):
             else:
                 weighting = torch.exp(weighting_argument)
             return reduce(
-                weighting * (predicted_velocity - target_velocity)**2,
+                weighting * diffusion_path_weighting * (predicted_velocity - target_velocity)**2,
                 'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
             ).sum(1).mean()
 
@@ -245,9 +288,16 @@ class FlowMatching(Model):
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 state = state + time_step_size * dot_state(t_now, state)
             elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+                if not isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+                    raise ValueError(
+                        f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {self.cfg.diffusion_path.__class__.__name__}.'
+                        ' Please use a different sampler (e.g., set model.sampler=EULER), or use a diffusion diffusion path (e.g., set model/diffusion_path=ConditionalOptimalTransport).'
+                    )
                 raise NotImplementedError()
-                state_drift = state + time_step_size * self(t_now, state)
-                state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
+                g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**t_now
+                state_drift = state - g**2 * score * time_step_size
+                state = state_drift + g * torch.randn_like(state) * time_step_size.abs().sqrt()
+                state_out = state_drift
             elif self.cfg.sampler is conf.models.Sampler.HEUN:
                 if self.cfg.sampling_use_observation_likelihood:
                     raise ValueError(
