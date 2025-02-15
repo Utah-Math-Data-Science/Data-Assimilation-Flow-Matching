@@ -234,6 +234,8 @@ class FlowMatching(Model):
             target_velocity = dx_target_velocity * (noise_flowed_to_t - state)
             diffusion_path_weighting = 1 / dt_std**2
             diffusion_time = rearrange(diffusion_time, 'batch 1 1 -> batch')
+        else:
+            raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
 
         predicted_velocity = rearrange(
             self(
