@@ -212,35 +212,38 @@ class FlowMatching(Model):
 
     def loss(self, state, observation):
         batch_size = self.cfg.loss_sample_count
-        noise = torch.randn_like(state[:batch_size])
+        if batch_size != 1 and batch_size != state.shape[0]:
+            raise ValueError(f'model.loss_sample_count can only be 1 or dataset.predicted_state_count={state.shape[0]}, not {batch_size}.')
+        noise = rearrange(torch.randn_like(state[:batch_size]), 'batch dim -> batch 1 dim')
+        state = rearrange(state, 'predicted_state_count dim -> 1 predicted_state_count dim')
+
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            diffusion_time = torch.rand((batch_size, 1), device=state.device)
-            noise_flowed_to_t = rearrange(
-                (diffusion_time * state)[None] + ((1 - diffusion_time) * noise)[:, None],
-                'batch predicted_state_count dim -> (batch predicted_state_count) dim'
+            diffusion_time = torch.rand(batch_size, device=state.device)
+            noise_flowed_to_t = (
+                state * rearrange(diffusion_time, 'batch -> 1 batch 1')
+                + noise * rearrange(1 - diffusion_time, 'batch -> batch 1 1')
             )
-            target_velocity = state[None] - noise[:, None]
+            target_velocity = state - noise
             diffusion_path_weighting = 1.
         elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+            diffusion_time = torch.rand((batch_size, 1, 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
             std = self.sigma(1 - diffusion_time)
-            noise_flowed_to_t = state[None] + (std * noise)[:, None]
+            noise_flowed_to_t = state + noise * std
             dt_std = self.dsigma(1 - diffusion_time)
             dx_target_velocity = -dt_std / std
-            target_velocity = dx_target_velocity[:, None] * (
-                noise_flowed_to_t - state[None]
-            )
-            noise_flowed_to_t = rearrange(
-                noise_flowed_to_t,
-                'batch predicted_state_count dim -> (batch predicted_state_count) dim'
-            )
+            target_velocity = dx_target_velocity * (noise_flowed_to_t - state)
             diffusion_path_weighting = 1 / dt_std**2
-        diffusion_time = repeat(diffusion_time, 'batch dim -> (repeat batch) dim', repeat=batch_size)
+            diffusion_time = rearrange(diffusion_time, 'batch 1 1 -> batch')
+
         predicted_velocity = rearrange(
-            self(diffusion_time, noise_flowed_to_t),
+            self(
+                repeat(diffusion_time, 'batch -> (repeat batch) 1', repeat=batch_size),
+                rearrange(noise_flowed_to_t, 'batch predicted_state_count dim -> (batch predicted_state_count) dim')
+            ),
             '(batch predicted_state_count) dim -> batch predicted_state_count dim',
             batch=batch_size
         )
+
         if observation is None or self.cfg.ignore_observations:
             weighting = 1.
             return reduce(
@@ -250,7 +253,7 @@ class FlowMatching(Model):
         else:
             weighting_argument = -0.5 * reduce(
                 (observation - state)**2,
-                'predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
+                '1 predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
             ) / self.observation_std**2
             if self.cfg.softmax_loss_weighting:
                 weighting = torch.softmax(weighting_argument, dim=1)
