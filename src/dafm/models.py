@@ -275,7 +275,14 @@ class FlowMatching(Model):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
         diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
         time_step_size = diffusion_times[1] - diffusion_times[0]
-        state = torch.randn_like(current_states)
+
+        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            state = torch.randn_like(current_states)
+        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            state = torch.randn_like(current_states) * self.sigma(1)
+        else:
+            raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
+
         if (
             self.cfg.sampling_use_observation_likelihood
             and observation is not None
