@@ -13,3 +13,4 @@ class DoubleWell(Dataset):
     observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.1)
     true_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.02)
     predicted_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.2)
+    predicted_state_model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)

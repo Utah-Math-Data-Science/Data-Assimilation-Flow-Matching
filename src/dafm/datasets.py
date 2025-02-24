@@ -46,7 +46,7 @@ class DoubleWell:
         observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
         self.data['observation'] = self.data['true_state'] + observation_noise
 
-        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=device)
+        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=device) * cfg.predicted_state_model_std
 
     @staticmethod
     def times(cfg, device):
