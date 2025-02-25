@@ -40,6 +40,7 @@ class ScoreMatching(Trainable):
     ])
 
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
+    sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
