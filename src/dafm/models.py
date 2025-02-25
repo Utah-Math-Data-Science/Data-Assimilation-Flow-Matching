@@ -140,20 +140,20 @@ class ScoreMatching(Model):
         state = torch.randn_like(current_states) * self.sigma(1)
         for t in diffusion_times[:-1]:
             score = self(t, state)
-            # why use mean? like RMSE?
-            score_norm = reduce(score**2, 'batch dim -> batch', 'mean').sqrt()
-            norm_max = 50
-            score_rescaling = torch.ones_like(score)
-            score_rescaling[score_norm > norm_max] = norm_max / score_rescaling[score_norm > norm_max]
-            score = score * score_rescaling
-
             if observation is None or self.cfg.ignore_observations:
                 observation_score = 0.
             else:
                 # this seems backwards; should it be (observation - state)? because we are given state?
                 observation_score = -(state - observation) / self.observation_std**2
-
             score = score + observation_score * self.observation_likelihood_score_damping(t)
+
+            # why use mean? like RMSE?
+            score_norm = reduce(score**2, 'batch dim -> batch', 'mean').sqrt()
+            score_norm_too_large = score_norm > self.cfg.sampling_max_score_norm
+            score[score_norm_too_large] = score[score_norm_too_large] * rearrange(
+                self.cfg.sampling_max_score_norm / score_norm[score_norm_too_large],
+                'batch -> batch 1'
+            )
 
             # why not use self.sigma here?
             g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**t
