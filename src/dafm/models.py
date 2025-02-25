@@ -155,7 +155,7 @@ class ScoreMatching(Model):
                 'batch -> batch 1'
             )
 
-            # why not use self.sigma here?
+            # this is sqrt(d/dt (self.sigma(t))^2)
             g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**t
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 state = state - g**2 * score * minus_time_step_size
@@ -270,18 +270,21 @@ class FlowMatching(Model):
         return t
         return 1.
 
+    def observation_likelihood_score_damping(self, t):
+        return (1 - 2 * t).clamp(min=0)
+
     @torch.no_grad
     def sample(self, current_states, observation, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
-        diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
-        time_step_size = diffusion_times[1] - diffusion_times[0]
-
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
             state = torch.randn_like(current_states)
         elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            diffusion_times = torch.linspace(0., 1. - self.cfg.diffusion_path.time_min, time_step_count, device=current_states.device)
             state = torch.randn_like(current_states) * self.sigma(1)
         else:
             raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
+        time_step_size = diffusion_times[1] - diffusion_times[0]
 
         if (
             self.cfg.sampling_use_observation_likelihood
@@ -299,16 +302,27 @@ class FlowMatching(Model):
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 state = state + time_step_size * dot_state(t_now, state)
+                state_out = state
             elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
                 if not isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
                     raise ValueError(
                         f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {self.cfg.diffusion_path.__class__.__name__}.'
                         ' Please use a different sampler (e.g., set model.sampler=EULER), or use a diffusion diffusion path (e.g., set model/diffusion_path=ConditionalOptimalTransport).'
                     )
-                raise NotImplementedError()
-                g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**t_now
-                state_drift = state - g**2 * score * time_step_size
-                state = state_drift + g * torch.randn_like(state) * time_step_size.abs().sqrt()
+                # this is sqrt(d/dt (self.sigma(t))^2) evaluated at 1 - t_now
+                g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**(1 - t_now)
+                if self.cfg.sampling_use_observation_likelihood_score:
+                    score = dot_state(t_now, state) / g**2
+                    if observation is None or self.cfg.ignore_observations:
+                        observation_score = 0.
+                    else:
+                        # this seems backwards; should it be (observation - state)? because we are given state?
+                        observation_score = -(state - observation) / self.observation_std**2
+                    score = score + observation_score * self.observation_likelihood_score_damping(1 - t_now)
+                    state_drift = state + g**2 * score * time_step_size
+                else:
+                    state_drift = state + time_step_size * dot_state(t_now, state)
+                state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
                 state_out = state_drift
             elif self.cfg.sampler is conf.models.Sampler.HEUN:
                 if self.cfg.sampling_use_observation_likelihood:
@@ -319,10 +333,11 @@ class FlowMatching(Model):
                 xdot_now = dot_state(t_now, state)
                 temp = state + time_step_size * xdot_now
                 state = state + time_step_size * (xdot_now + dot_state(t_next, temp)) / 2
+                state_out = state
             else:
                 raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
 
-        return state
+        return state_out
 
 
 def get_model(cfg, state_dimension, observation_std):
