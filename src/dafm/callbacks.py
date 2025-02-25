@@ -35,7 +35,7 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
         super().on_train_epoch_start(trainer)
         time_step_to_estimate = self._get_current_time_step_of_estimation(trainer)
         if self.cfg.model.train_on_initial_predicted_state and trainer.current_epoch == 0:
-            estimation_message = f'Training on initial predicted state without observation at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
+            estimation_message = f'Training on initial predicted state without observation at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count - self.cfg.dataset.time_step_count_drop_first}'
         else:
             ignore_observations_text = ' without observation' if self.cfg.model.ignore_observations else ''
             estimation_message = f'Estimating state{ignore_observations_text} for time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
@@ -63,6 +63,14 @@ class SaveTrajectories(pl.callbacks.Callback):
 
     def on_train_end(self, trainer, pl_module):
         data = pl_module.dataset.dataset.data.copy()
+        data['true_state'] = rearrange(
+            data['true_state'],
+            't 1 dim -> t dim',
+        )
+        data['observation'] = rearrange(
+            data['observation'],
+            't 1 dim -> t dim',
+        )
         data['predicted_state'] = rearrange(
             data['predicted_state'],
             't predicted_state_count dim -> t predicted_state_count dim'

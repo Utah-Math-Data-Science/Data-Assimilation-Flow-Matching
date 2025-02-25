@@ -1,7 +1,7 @@
 from collections import defaultdict
 import logging
 
-from einops import rearrange, reduce
+from einops import rearrange, reduce, unpack
 import torch
 from torch.utils.data.dataset import IterableDataset
 
@@ -40,7 +40,7 @@ class DoubleWell:
             self.data['true_state'].append(next_state)
         self.data['true_state'] = rearrange(
             self.data['true_state'],
-            't dim -> t dim'
+            't 1 dim -> t 1 dim'
         )
 
         observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
@@ -53,15 +53,85 @@ class DoubleWell:
         # number of time steps after the initial condition at time step zero
         return cfg.time_step_size * torch.arange(cfg.time_step_count + 1, device=device)[:, None]
 
-    @staticmethod
-    def initialize_states(cfg, device):
-        true_state = -1 + torch.randn(1, device=device) * cfg.true_state_initial_condition_std
-        predicted_state = true_state + torch.randn((cfg.predicted_state_count, 1), device=device) * cfg.predicted_state_initial_condition_std
+    def initialize_states(self, cfg, device):
+        true_state = -1 + torch.randn((1, self.state_dimension), device=device) * cfg.true_state_initial_condition_std
+        predicted_state = true_state + torch.randn((cfg.predicted_state_count, self.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
         return true_state, predicted_state
 
     @staticmethod
     def dynamics(t, x):
         return -4 * x * (x**2 - 1)
+
+    def predict(self, time_step, t, sampled_state):
+        next_predicted_state = euler_maruyama(
+            self.cfg.time_step_size, t, sampled_state, self.dynamics, self.predicted_state_noise[time_step]
+        )
+        return next_predicted_state
+
+    def __iter__(self):
+        for time_step, t in enumerate(self.times):
+            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1]
+        self.data['predicted_state'] = rearrange(
+            self.data['predicted_state'],
+            't predicted_state_count dim -> t predicted_state_count dim'
+        )
+
+
+class Lorenz63:
+    state_dimension = 3
+
+    def __init__(self, cfg, device):
+        self.cfg = cfg
+        self.device = device
+
+        self.data = defaultdict(list)
+        time_step_indices, times_from_zero = self.times(cfg, device)
+        self.data['true_state'].append(self.initialize_true_state(cfg, device))
+
+        times_after_zero = times_from_zero[:-1]
+        true_state_noise = torch.randn((times_after_zero.shape[0], *self.data['true_state'][0].shape), device=device) * cfg.model_std
+        for time_step, t in enumerate(times_after_zero):
+            state = self.data['true_state'][-1]
+            next_state = euler_maruyama(
+                cfg.time_step_size, t, state, self.dynamics, true_state_noise[time_step]
+            )
+            self.data['true_state'].append(next_state)
+        self.data['true_state'] = rearrange(
+            self.data['true_state'],
+            't 1 dim -> t 1 dim'
+        )
+
+        times_to_keep = time_step_indices >= self.cfg.time_step_count_drop_first
+        self.data['times'] = times_from_zero[times_to_keep]
+        self.times = self.data['times'][:-1]
+        self.data['true_state'] = self.data['true_state'][times_to_keep]
+        self.data['predicted_state'].append(
+            self.data['true_state'][0] + torch.randn((cfg.predicted_state_count, self.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
+        )
+
+        observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
+        self.data['observation'] = self.data['true_state'] + observation_noise
+
+        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=device) * cfg.predicted_state_model_std
+
+    @staticmethod
+    def times(cfg, device):
+        time_step_indices = torch.arange(cfg.time_step_count + 1, device=device)
+        return time_step_indices, cfg.time_step_size * time_step_indices[:, None]
+
+    def initialize_true_state(self, cfg, device):
+        true_state = torch.randn((1, self.state_dimension), device=device)
+        return true_state
+
+    def dynamics(self, t, x):
+        x = x * self.cfg.rescaling
+        x0, x1, x2 = unpack(x, self.state_dimension * [[]], 'state_count *')
+        dot_x = rearrange([
+            self.cfg.sigma * (x1 - x0),
+            x0 * (self.cfg.rho - x2) - x1,
+            x0 * x1 - self.cfg.beta * x2,
+        ], 'dim state_count -> state_count dim')
+        return dot_x / self.cfg.rescaling
 
     def predict(self, time_step, t, sampled_state):
         next_predicted_state = euler_maruyama(
@@ -108,5 +178,7 @@ class PredictedStatesAndObservation(IterableDataset):
 def get_dynamics_dataset(cfg, device):
     if isinstance(cfg, conf.datasets.DoubleWell):
         return DoubleWell(cfg, device)
+    elif isinstance(cfg, conf.datasets.Lorenz63):
+        return Lorenz63(cfg, device)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')
