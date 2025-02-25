@@ -20,6 +20,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "sqlalchemy==2.0.36",
     "torch>=2.4.1",
+    "torchdiffeq>=0.2.5",
 ]
 
 [project.scripts]
