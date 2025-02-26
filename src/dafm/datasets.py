@@ -16,8 +16,6 @@ def euler_maruyama(dt, t, x, f, noise):
 
 
 class DoubleWell:
-    state_dimension = 1
-
     def __init__(self, cfg, device):
         self.cfg = cfg
         self.device = device
@@ -54,8 +52,8 @@ class DoubleWell:
         return cfg.time_step_size * torch.arange(cfg.time_step_count + 1, device=device)[:, None]
 
     def initialize_states(self, cfg, device):
-        true_state = -1 + torch.randn((1, self.state_dimension), device=device) * cfg.true_state_initial_condition_std
-        predicted_state = true_state + torch.randn((cfg.predicted_state_count, self.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
+        true_state = -1 + torch.randn((1, self.cfg.state_dimension), device=device) * cfg.true_state_initial_condition_std
+        predicted_state = true_state + torch.randn((cfg.predicted_state_count, self.cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
         return true_state, predicted_state
 
     @staticmethod
@@ -78,8 +76,6 @@ class DoubleWell:
 
 
 class Lorenz63:
-    state_dimension = 3
-
     def __init__(self, cfg, device):
         self.cfg = cfg
         self.device = device
@@ -106,7 +102,7 @@ class Lorenz63:
         self.times = self.data['times'][:-1]
         self.data['true_state'] = self.data['true_state'][times_to_keep]
         self.data['predicted_state'].append(
-            self.data['true_state'][0] + torch.randn((cfg.predicted_state_count, self.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
+            self.data['true_state'][0] + torch.randn((cfg.predicted_state_count, self.cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
         )
 
         observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
@@ -120,18 +116,86 @@ class Lorenz63:
         return time_step_indices, cfg.time_step_size * time_step_indices[:, None]
 
     def initialize_true_state(self, cfg, device):
-        true_state = torch.randn((1, self.state_dimension), device=device)
+        true_state = torch.randn((1, self.cfg.state_dimension), device=device)
         return true_state
 
     def dynamics(self, t, x):
         x = x * self.cfg.rescaling
-        x0, x1, x2 = unpack(x, self.state_dimension * [[]], 'state_count *')
+        x0, x1, x2 = unpack(x, self.cfg.state_dimension * [[]], 'state_count *')
         dot_x = rearrange([
             self.cfg.sigma * (x1 - x0),
             x0 * (self.cfg.rho - x2) - x1,
             x0 * x1 - self.cfg.beta * x2,
         ], 'dim state_count -> state_count dim')
         return dot_x / self.cfg.rescaling
+
+    def predict(self, time_step, t, sampled_state):
+        next_predicted_state = euler_maruyama(
+            self.cfg.time_step_size, t, sampled_state, self.dynamics, self.predicted_state_noise[time_step]
+        )
+        return next_predicted_state
+
+    def __iter__(self):
+        for time_step, t in enumerate(self.times):
+            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1]
+        self.data['predicted_state'] = rearrange(
+            self.data['predicted_state'],
+            't predicted_state_count dim -> t predicted_state_count dim'
+        )
+
+
+class Lorenz96:
+    def __init__(self, cfg, device):
+        self.cfg = cfg
+        self.device = device
+
+        self.data = defaultdict(list)
+        time_step_indices, times_from_zero = self.times(cfg, device)
+        self.data['true_state'].append(self.initialize_true_state(cfg, device))
+
+        times_after_zero = times_from_zero[:-1]
+        true_state_noise = torch.randn((times_after_zero.shape[0], *self.data['true_state'][0].shape), device=device) * cfg.model_std
+        for time_step, t in enumerate(times_after_zero):
+            state = self.data['true_state'][-1]
+            if time_step > 0 and time_step % 30 == 0:
+                state = state + torch.randn_like(state) * 3
+            next_state = euler_maruyama(
+                cfg.time_step_size, t, state, self.dynamics, true_state_noise[time_step]
+            )
+            self.data['true_state'].append(next_state)
+        self.data['true_state'] = rearrange(
+            self.data['true_state'],
+            't 1 dim -> t 1 dim'
+        )
+
+        times_to_keep = time_step_indices >= self.cfg.time_step_count_drop_first
+        self.data['times'] = times_from_zero[times_to_keep]
+        self.times = self.data['times'][:-1]
+        self.data['true_state'] = self.data['true_state'][times_to_keep]
+        self.data['predicted_state'].append(
+            self.data['true_state'][0] + torch.randn((cfg.predicted_state_count, self.cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
+        )
+
+        observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
+        self.data['observation'] = self.data['true_state']**3 + observation_noise
+
+        self.predicted_state_noise = torch.randn((self.times.shape[0], *self.data['predicted_state'][0].shape), device=device) * cfg.predicted_state_model_std
+
+    @staticmethod
+    def times(cfg, device):
+        time_step_indices = torch.arange(cfg.time_step_count + 1, device=device)
+        return time_step_indices, cfg.time_step_size * time_step_indices[:, None]
+
+    def initialize_true_state(self, cfg, device):
+        true_state = cfg.true_state_initial_condition_mean + torch.randn((1, self.cfg.state_dimension), device=device) * cfg.true_state_initial_condition_std
+        true_state = torch.ones((1, self.cfg.state_dimension), device=device) * self.cfg.forcing
+        return true_state
+
+    def dynamics(self, t, x):
+        x_p1 = x.roll(-1, -1)
+        x_m2 = x.roll(2, -1)
+        x_m1 = x.roll(1, -1)
+        return (x_p1 - x_m2) * x_m1 - x + self.cfg.forcing
 
     def predict(self, time_step, t, sampled_state):
         next_predicted_state = euler_maruyama(
@@ -180,5 +244,7 @@ def get_dynamics_dataset(cfg, device):
         return DoubleWell(cfg, device)
     elif isinstance(cfg, conf.datasets.Lorenz63):
         return Lorenz63(cfg, device)
+    elif isinstance(cfg, conf.datasets.Lorenz96):
+        return Lorenz96(cfg, device)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')
