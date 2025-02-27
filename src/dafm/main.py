@@ -53,10 +53,10 @@ class DataAssimilation(pl.LightningModule):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
         self.optimizer.zero_grad()
         next_observation = batch['next_observation'] if not batch['ignore_observation'] else None
-        loss = self.model.loss(batch['next_predicted_state'], next_observation)
-        self.manual_backward(loss)
+        losses = self.model.loss(batch['next_predicted_state'], next_observation)
+        self.manual_backward(losses['loss'])
         self.optimizer.step()
-        return dict(loss=loss)
+        return losses
 
 
 @hydra.main(**utils.HYDRA_INIT)

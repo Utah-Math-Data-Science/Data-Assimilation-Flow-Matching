@@ -220,65 +220,64 @@ class FlowMatching(Model):
         state = rearrange(state, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            diffusion_time = torch.rand(batch_size, device=state.device)
-            noise_flowed_to_t = (
-                state * rearrange(diffusion_time, 'batch -> 1 batch 1')
-                + noise * rearrange(1 - diffusion_time, 'batch -> batch 1 1')
-            )
+            diffusion_time = torch.rand((batch_size, 1, 1), device=state.device)
+            mean = state * rearrange(diffusion_time, 'batch 1 1 -> 1 batch 1')
+            std = 1 - diffusion_time
+            noise_flowed_to_t = mean + noise * std
             eps = 1e-6
-            dx_target_velocity = -1 / (1 - diffusion_time + eps)
-            dx_log_pt = -(noise_flowed_to_t - state) / (1 - diffusion_time + eps)**2
+            dx_target_velocity = -1 / (std + eps)
+            dx_log_pt = -(noise_flowed_to_t - mean) / (std + eps)**2
             target_velocity = state - noise
             diffusion_path_weighting = 1.
         elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
             diffusion_time = torch.rand((batch_size, 1, 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+            mean = state
             std = self.sigma(1 - diffusion_time)
-            noise_flowed_to_t = state + noise * std
+            noise_flowed_to_t = mean + noise * std
             dt_std = self.dsigma(1 - diffusion_time)
             dx_target_velocity = -dt_std / std
-            dx_log_pt = -(noise_flowed_to_t - state) / std**2
-            target_velocity = dx_target_velocity * (noise_flowed_to_t - state)
+            dx_log_pt = -(noise_flowed_to_t - mean) / std**2
+            target_velocity = dx_target_velocity * (noise_flowed_to_t - mean)
             diffusion_path_weighting = 1 / dt_std**2
-            diffusion_time = rearrange(diffusion_time, 'batch 1 1 -> batch')
         else:
             raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
 
         if self.cfg.use_divergence_matching:
-            xt = rearrange(noise_flowed_to_t, 'batch predicted_state_count dim -> (batch predicted_state_count) dim')
-            hutchinson_noise = torch.randn_like(xt)
+            hutchinson_noise = torch.randn((batch_size * state.shape[1], state.shape[2]), device=state.device)
             predicted_velocity, predicted_velocity_jvp = torch.autograd.functional.jvp(
                 lambda xt: self(
-                    repeat(diffusion_time, 'batch -> (repeat batch) 1', repeat=batch_size),
+                    repeat(diffusion_time, 'batch 1 1 -> (repeat batch) 1', repeat=batch_size),
                     xt
                 ),
-                xt,
-                hutchinson_noise
+                rearrange(noise_flowed_to_t, 'batch predicted_state_count dim -> (batch predicted_state_count) dim'),
+                hutchinson_noise,
+                create_graph=True,
+            )
+            predicted_velocity, predicted_velocity_jvp, hutchinson_noise = map(
+                lambda x: rearrange(x, '(batch predicted_state_count) dim -> batch predicted_state_count dim', batch=batch_size),
+                (predicted_velocity, predicted_velocity_jvp, hutchinson_noise)
             )
             predicted_divergence = utils.inner_product(hutchinson_noise, predicted_velocity_jvp)
-            if self.cfg.divergence_matching_use_hutchinson_trace_for_divergence_target:
+            if self.cfg.divergence_matching_use_hutchinson_trace_for_target_divergence:
                 target_divergence = (
                     utils.inner_product(hutchinson_noise * dx_target_velocity, hutchinson_noise)
-                    + (
-                        utils.inner_product(hutchinson_noise, target_velocity)
-                        - utils.inner_product(hutchinson_noise, predicted_velocity)
-                    ) * utils.inner_product(dx_log_pt, hutchinson_noise)
+                    + utils.inner_product(hutchinson_noise, target_velocity - predicted_velocity) * utils.inner_product(dx_log_pt, hutchinson_noise)
                 )
             else:
-                target_divergence = ...
+                target_divergence = (
+                    dx_target_velocity.reshape(batch_size, -1).sum(-1, keepdim=True)
+                    + utils.inner_product(target_velocity, dx_log_pt)
+                    - utils.inner_product(predicted_velocity, dx_log_pt)
+                )
 
-            predicted_velocity = rearrange(
-                predicted_velocity,
-                '(batch predicted_state_count) dim -> batch predicted_state_count dim',
-                batch=batch_size
-            )
             divergence_matching_weighting = 1 / dx_target_velocity.abs() / (predicted_velocity.shape[1] * predicted_velocity.shape[2])
             divergence_matching_loss = self.cfg.divergence_matching_loss_coefficient * (
-                divergence_matching_weighting * (target_velocity - predicted_divergence)
+                divergence_matching_weighting * (target_divergence - predicted_divergence)
             ).abs().mean()
         else:
             predicted_velocity = rearrange(
                 self(
-                    repeat(diffusion_time, 'batch -> (repeat batch) 1', repeat=batch_size),
+                    repeat(diffusion_time, 'batch 1 1 -> (repeat batch) 1', repeat=batch_size),
                     rearrange(noise_flowed_to_t, 'batch predicted_state_count dim -> (batch predicted_state_count) dim')
                 ),
                 '(batch predicted_state_count) dim -> batch predicted_state_count dim',
@@ -306,7 +305,11 @@ class FlowMatching(Model):
                 'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
             ).sum(1).mean()
 
-        return flow_loss + divergence_matching_loss
+        return dict(
+            loss=flow_loss + divergence_matching_loss,
+            flow_loss=flow_loss,
+            divergence_matching_loss=divergence_matching_loss,
+        )
 
     def observation_likelihood_vector_field_damping(self, t):
         return t
