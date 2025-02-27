@@ -1,0 +1,7 @@
+defaults:
+  - _Lorenz96
+  - _self_
+
+time_step_count: 100
+time_step_count_drop_first: 0
+time_step_size: .01
