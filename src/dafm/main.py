@@ -89,7 +89,7 @@ def main(cfg):
     with pl.utilities.seed.isolate_rng():
         dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device)
     with pl.utilities.seed.isolate_rng():
-        model = models.get_model(cfg.model, dynamics.state_dimension, cfg.dataset.observation_std)
+        model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_std)
     dataset = datasets.PredictedStatesAndObservation(dynamics, model)
     data_assimilation = DataAssimilation(cfg, dataset, model)
 

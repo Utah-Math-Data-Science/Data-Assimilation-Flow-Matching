@@ -68,3 +68,7 @@ class FlowMatching(Trainable):
     sampling_use_observation_likelihood_score: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
+
+    use_divergence_matching: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    divergence_matching_loss_coefficient: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-4)
+    divergence_matching_use_hutchinson_trace_for_divergence_target: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)

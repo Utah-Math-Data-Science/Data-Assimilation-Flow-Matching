@@ -9,3 +9,7 @@ def unpack_batch(batch):
     batch, _, epoch = batch
     batch, batch_idx, _ = batch
     return batch, batch_idx, epoch
+
+
+def inner_product(a, b):
+    return (a * b).reshape(a.shape[0], -1).sum(-1, keepdim=True)
