@@ -17,6 +17,7 @@ dependencies = [
     "lightning>=2.5.0.post0",
     "pandas>=2.2.3",
     "pyarrow>=19.0.0",
+    "pytest>=8.3.4",
     "seaborn>=0.13.2",
     "sqlalchemy==2.0.36",
     "torch>=2.4.1",
