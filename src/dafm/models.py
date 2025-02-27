@@ -213,7 +213,8 @@ class FlowMatching(Model):
     def loss(self, state, observation):
         batch_size = self.cfg.loss_sample_count
         if batch_size != 1 and batch_size != state.shape[0]:
-            raise ValueError(f'model.loss_sample_count can only be 1 or dataset.predicted_state_count={state.shape[0]}, not {batch_size}.')
+            # model.batch_size <= predicted_state_count
+            raise ValueError(f'model.loss_sample_count can only be 1 or model.batch_size={state.shape[0]}, not {batch_size}.')
         noise = rearrange(torch.randn_like(state[:batch_size]), 'batch dim -> batch 1 dim')
         state = rearrange(state, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
