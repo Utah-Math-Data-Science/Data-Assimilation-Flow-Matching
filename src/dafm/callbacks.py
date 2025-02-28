@@ -1,4 +1,5 @@
 import logging
+import math
 
 from einops import rearrange, reduce
 import lightning.pytorch as pl
@@ -25,21 +26,16 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
         items.pop('v_num', None)
         return items
 
-    def _get_current_time_step_of_estimation(self, trainer):
-        if self.cfg.model.train_on_initial_predicted_state:
-            return trainer.current_epoch
-        else:
-            return trainer.current_epoch + 1
-
-    def on_train_epoch_start(self, trainer: "pl.Trainer", *_) -> None:
+    def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module) -> None:
         super().on_train_epoch_start(trainer)
-        time_step_to_estimate = self._get_current_time_step_of_estimation(trainer)
-        if self.cfg.model.train_on_initial_predicted_state and trainer.current_epoch == 0:
-            estimation_message = f'Training on initial predicted state without observation at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count - self.cfg.dataset.time_step_count_drop_first}'
+        time_step = pl_module.dataset.time_step
+        time_step_to_estimate = time_step + 1
+        if self.cfg.model.train_on_initial_predicted_state and time_step == 0 and trainer.current_epoch == 0:
+            estimation_message = f'Training on initial predicted state without observation at time step {time_step}/{self.cfg.dataset.time_step_count - self.cfg.dataset.time_step_count_drop_first}'
         else:
             ignore_observations_text = ' without observation' if self.cfg.model.ignore_observations else ''
-            estimation_message = f'Estimating state{ignore_observations_text} for time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
-        self.train_progress_bar.set_description(f'{estimation_message}, training for {self.cfg.model.epoch_count} epochs')
+            estimation_message = f'Training{ignore_observations_text} to estimate state at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
+        self.train_progress_bar.set_description(f'{estimation_message}. Epochs={self.cfg.model.epoch_count}, Batches={math.ceil(self.cfg.dataset.predicted_state_count / self.cfg.model.batch_size)}')
 
 
 class LogStats(pl.callbacks.Callback):

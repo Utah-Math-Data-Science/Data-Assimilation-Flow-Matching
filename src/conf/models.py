@@ -25,6 +25,8 @@ class Trainable(Model):
 
     train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+    train_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class Sampler(enum.Enum):

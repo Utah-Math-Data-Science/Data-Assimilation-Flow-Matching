@@ -4,6 +4,7 @@ import logging
 from einops import rearrange, reduce, unpack
 import torch
 from torch.utils.data.dataset import IterableDataset
+from tqdm import tqdm
 
 import conf.datasets
 
@@ -73,7 +74,8 @@ class Dataset:
 
     def __iter__(self):
         for time_step, t in enumerate(self.times):
-            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1]
+            ignore_observation = time_step % self.cfg.observe_every_n_time_steps != 0
+            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1], ignore_observation
         self.data['predicted_state'] = rearrange(
             self.data['predicted_state'],
             't predicted_state_count dim -> t predicted_state_count dim'
@@ -147,26 +149,34 @@ class PredictedStatesAndObservation(IterableDataset):
     def __init__(self, dataset, model):
         self.dataset = dataset
         self.model = model
+        self.time_step = None  # set in iter
 
     def __iter__(self):
         if self.model.cfg.train_on_initial_predicted_state:
-            for _, (time_step, t, predicted_state, next_observation) in zip(range(1), self.dataset):
+            for _, (time_step, t, predicted_state, next_observation, _) in zip(range(1), self.dataset):
+                self.time_step = time_step
                 yield time_step, t, predicted_state, next_observation, True
                 if self.model.cfg.resample_initial_predicted_state:
                     sampled_state = self.model.sample(predicted_state, None)
                     self.dataset.data['predicted_state'][0] = sampled_state
-        for time_step, t, predicted_state, next_observation in self.dataset:
+        for time_step, t, predicted_state, next_observation, ignore_observation in tqdm(self.dataset, total=self.dataset.cfg.time_step_count, desc='Estimating state at time step', initial=1):
+            self.time_step = time_step
             next_predicted_state = self.dataset.predict(time_step, t, predicted_state)
-            log.info('next_predicted_state mean: %s', reduce(
-                next_predicted_state,
-                'predicted_state_count dim ->', 'mean'
-            ).item())
-            yield time_step, t, next_predicted_state, next_observation, False
+            # log.info('next_predicted_state mean: %s', reduce(
+            #     next_predicted_state,
+            #     'predicted_state_count dim ->', 'mean'
+            # ).item())
+            if not ignore_observation or self.model.cfg.train_when_ignoring_observation:
+                yield time_step, t, next_predicted_state, next_observation, ignore_observation
+            if self.model.cfg.resample_predicted_state_when_ignoring_observation:
+                sampled_state = self.model.sample(next_predicted_state, next_observation)
+            else:
+                sampled_state = next_predicted_state
             sampled_state = self.model.sample(next_predicted_state, next_observation)
-            log.info('sampled_state mean: %s', reduce(
-                sampled_state,
-                'predicted_state_count dim ->', 'mean'
-            ).item())
+            # log.info('sampled_state mean: %s', reduce(
+            #     sampled_state,
+            #     'predicted_state_count dim ->', 'mean'
+            # ).item())
             self.dataset.data['predicted_state'].append(sampled_state)
 
 
