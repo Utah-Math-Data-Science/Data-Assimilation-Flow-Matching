@@ -272,8 +272,8 @@ class FlowMatching(Model):
 
             divergence_matching_weighting = 1 / dx_target_velocity.abs() / (predicted_velocity.shape[1] * predicted_velocity.shape[2])
             divergence_matching_loss = self.cfg.divergence_matching_loss_coefficient * (
-                divergence_matching_weighting * (target_divergence - predicted_divergence)
-            ).abs().mean()
+                divergence_matching_weighting * (target_divergence - predicted_divergence).abs()
+            ).mean()
         else:
             predicted_velocity = rearrange(
                 self(
