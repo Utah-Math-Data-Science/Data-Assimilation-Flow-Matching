@@ -1,5 +1,8 @@
+from typing import List, Any
 from dataclasses import field
 
+import omegaconf
+import hydra_orm
 from hydra_orm import orm
 import sqlalchemy as sa
 
@@ -7,12 +10,16 @@ import conf.observe
 
 
 class Dataset(orm.InheritableTable):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(observe='Full'),
+        '_self_',
+    ])
     predicted_state_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1000)
     time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=100)
     time_step_count_drop_first: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=0)
     time_step_size: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.1)
     observe_every_n_time_steps: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
-    observe: conf.observe.Observe = orm.OneToManyField(conf.observe.Observe, default_factory=conf.observe.Full)
+    observe: conf.observe.Observe = orm.OneToManyField(conf.observe.Observe, default=omegaconf.MISSING)
 
 
 class DoubleWell(Dataset):

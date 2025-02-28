@@ -8,7 +8,7 @@ import hydra
 import hydra_orm.utils
 from hydra_orm import orm
 
-from conf import datasets, models, diffusion_path
+from conf import datasets, models, diffusion_path, observe
 from dafm import utils
 
 
@@ -50,6 +50,9 @@ orm.store_config(datasets.DoubleWell, group=Conf.dataset.key)
 cs = hydra.core.config_store.ConfigStore.instance()
 cs.store(group=Conf.dataset.key, name='_Lorenz63', node=datasets.Lorenz63)
 cs.store(group=Conf.dataset.key, name='_Lorenz96', node=datasets.Lorenz96)
+orm.store_config(observe.Full, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
+orm.store_config(observe.EveryNthDimension, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
+orm.store_config(observe.Exponentiate, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(models.ScoreMatching, group=Conf.model.key)
 orm.store_config(models.FlowMatching, group=Conf.model.key)
 orm.store_config(diffusion_path.ConditionalOptimalTransport, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')
