@@ -302,6 +302,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "torch" },
     { name = "torchdiffeq" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -319,6 +320,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = "==2.0.36" },
     { name = "torch", specifier = ">=2.4.1", index = "https://download.pytorch.org/whl/cu121" },
     { name = "torchdiffeq", specifier = ">=0.2.5" },
+    { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
 [[package]]
