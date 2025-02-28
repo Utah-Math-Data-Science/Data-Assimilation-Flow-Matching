@@ -118,23 +118,25 @@ class ScoreMatching(Model):
             / np.log(self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)
         )**(1/2)
 
-    def loss(self, state, observation):
+    def loss(self, state, observation, observe):
         # diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - 1e-5) + 1e-5
         diffusion_time = torch.rand((state.shape[0], 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
         noise = torch.randn_like(state)
         std = self.sigma(diffusion_time)
         noised_state = state + noise * std
         predicted_score = self(diffusion_time, noised_state)
-        return reduce(
-            (predicted_score * std + noise)**2,
-            'batch dim -> batch', 'sum'
-        ).mean()
+        return dict(
+            loss=reduce(
+                (predicted_score * std + noise)**2,
+                'batch dim -> batch', 'sum'
+            ).mean(),
+        )
 
     def observation_likelihood_score_damping(self, t):
         return (1 - 2 * t).clamp(min=0)
 
     @torch.no_grad
-    def sample(self, current_states, observation, time_step_count=None):
+    def sample(self, current_states, observation, observe, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
         diffusion_times = torch.linspace(1., self.cfg.diffusion_path.time_min, time_step_count, device=current_states.device)
         minus_time_step_size = diffusion_times[1] - diffusion_times[0]
@@ -144,8 +146,19 @@ class ScoreMatching(Model):
             if observation is None or self.cfg.ignore_observations:
                 observation_score = 0.
             else:
+                with torch.enable_grad():
+                    state_grad = state.detach().requires_grad_()
+                    log_observation_likelihood = -.5 * reduce(
+                        (observe(state_grad) - observation).pow(2),
+                        'state_count dim ->',
+                        'sum'
+                    )
+                    observation_score, *_ = torch.autograd.grad(
+                        outputs=log_observation_likelihood,
+                        inputs=state_grad,
+                    )
                 # this seems backwards; should it be (observation - state)? because we are given state?
-                observation_score = -(state - observation) / self.observation_std**2
+                # observation_score = -(observe(state) - observation) / self.observation_std**2
             score = score + observation_score * self.observation_likelihood_score_damping(t)
 
             # why use mean? like RMSE?
@@ -211,7 +224,7 @@ class FlowMatching(Model):
             / np.log(self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)
         )**(1/2)
 
-    def loss(self, state, observation):
+    def loss(self, state, observation, observe):
         batch_size = self.cfg.loss_sample_count
         if batch_size != 1 and batch_size != state.shape[0]:
             # model.batch_size <= predicted_state_count
@@ -293,7 +306,7 @@ class FlowMatching(Model):
             ).mean()
         else:
             weighting_argument = -0.5 * reduce(
-                (observation - state)**2,
+                (observation - observe(state))**2,
                 '1 predicted_state_count dim -> 1 predicted_state_count 1', 'sum'
             ) / self.observation_std**2
             if self.cfg.softmax_loss_weighting:
@@ -319,7 +332,7 @@ class FlowMatching(Model):
         return (1 - 2 * t).clamp(min=0)
 
     @torch.no_grad
-    def sample(self, current_states, observation, time_step_count=None):
+    def sample(self, current_states, observation, observe, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
             diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
@@ -336,6 +349,7 @@ class FlowMatching(Model):
             and observation is not None
             and not self.cfg.ignore_observations
         ):
+            raise NotImplementedError()
             dot_state = lambda t, x: (
                 self(t, x)
                 + self.observation_likelihood_vector_field_damping(t) * (
@@ -361,6 +375,7 @@ class FlowMatching(Model):
                     if observation is None or self.cfg.ignore_observations:
                         observation_score = 0.
                     else:
+                        raise NotImplementedError('Need to use automatic differentiation to get the score')
                         # this seems backwards; should it be (observation - state)? because we are given state?
                         observation_score = -(state - observation) / self.observation_std**2
                     score = score + observation_score * self.observation_likelihood_score_damping(1 - t_now)

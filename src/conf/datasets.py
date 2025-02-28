@@ -3,6 +3,8 @@ from dataclasses import field
 from hydra_orm import orm
 import sqlalchemy as sa
 
+import conf.observe
+
 
 class Dataset(orm.InheritableTable):
     predicted_state_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1000)
@@ -10,6 +12,7 @@ class Dataset(orm.InheritableTable):
     time_step_count_drop_first: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=0)
     time_step_size: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.1)
     observe_every_n_time_steps: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
+    observe: conf.observe.Observe = orm.OneToManyField(conf.observe.Observe, default_factory=conf.observe.Full)
 
 
 class DoubleWell(Dataset):

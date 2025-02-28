@@ -7,6 +7,7 @@ from torch.utils.data.dataset import IterableDataset
 from tqdm import tqdm
 
 import conf.datasets
+import dafm.observe
 
 
 log = logging.getLogger(__file__)
@@ -17,8 +18,9 @@ def euler_maruyama(dt, t, x, f, noise):
 
 
 class Dataset:
-    def __init__(self, cfg, device):
+    def __init__(self, cfg, observe, device):
         self.cfg = cfg
+        self.observe = observe
         self.device = device
 
         self.data = defaultdict(list)
@@ -62,9 +64,6 @@ class Dataset:
 
     def true_state_step(self, time_step, t, true_state, model_noise):
         raise NotImplementedError()
-
-    def observe(self, true_state):
-        return true_state
 
     def predict(self, time_step, t, sampled_state):
         next_predicted_state = euler_maruyama(
@@ -141,9 +140,6 @@ class Lorenz96(Dataset):
         )
         return next_true_state
 
-    def observe(self, true_state):
-        return true_state**3
-
 
 class PredictedStatesAndObservation(IterableDataset):
     def __init__(self, dataset, model):
@@ -157,7 +153,7 @@ class PredictedStatesAndObservation(IterableDataset):
                 self.time_step = time_step
                 yield time_step, t, predicted_state, next_observation, True
                 if self.model.cfg.resample_initial_predicted_state:
-                    sampled_state = self.model.sample(predicted_state, None)
+                    sampled_state = self.model.sample(predicted_state, None, self.dataset.observe)
                     self.dataset.data['predicted_state'][0] = sampled_state
         for time_step, t, predicted_state, next_observation, ignore_observation in tqdm(self.dataset, total=self.dataset.cfg.time_step_count, desc='Estimating state at time step', initial=1):
             self.time_step = time_step
@@ -172,7 +168,7 @@ class PredictedStatesAndObservation(IterableDataset):
                 sampled_state = self.model.sample(next_predicted_state, next_observation)
             else:
                 sampled_state = next_predicted_state
-            sampled_state = self.model.sample(next_predicted_state, next_observation)
+            sampled_state = self.model.sample(next_predicted_state, next_observation, self.dataset.observe)
             # log.info('sampled_state mean: %s', reduce(
             #     sampled_state,
             #     'predicted_state_count dim ->', 'mean'
@@ -181,11 +177,12 @@ class PredictedStatesAndObservation(IterableDataset):
 
 
 def get_dynamics_dataset(cfg, device):
+    observe = dafm.observe.get_observe(cfg)
     if isinstance(cfg, conf.datasets.DoubleWell):
-        return DoubleWell(cfg, device)
+        return DoubleWell(cfg, observe, device)
     elif isinstance(cfg, conf.datasets.Lorenz63):
-        return Lorenz63(cfg, device)
+        return Lorenz63(cfg, observe, device)
     elif isinstance(cfg, conf.datasets.Lorenz96):
-        return Lorenz96(cfg, device)
+        return Lorenz96(cfg, observe, device)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

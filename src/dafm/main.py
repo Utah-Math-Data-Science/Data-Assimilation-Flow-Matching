@@ -53,7 +53,7 @@ class DataAssimilation(pl.LightningModule):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
         self.optimizer.zero_grad()
         next_observation = batch['next_observation'] if not batch['ignore_observation'] else None
-        losses = self.model.loss(batch['next_predicted_state'], next_observation)
+        losses = self.model.loss(batch['next_predicted_state'], next_observation, self.dataset.dataset.observe)
         self.manual_backward(losses['loss'])
         self.optimizer.step()
         return losses
@@ -73,6 +73,7 @@ def main(cfg):
     logger = loggers.CSVLogger(cfg.run_dir, name=None)
 
     trainer = pl.Trainer(
+        # detect_anomaly=True,
         logger=logger,
         max_epochs=cfg.model.epoch_count,
         check_val_every_n_epoch=cfg.model.epoch_count,
