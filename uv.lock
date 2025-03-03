@@ -606,8 +606,8 @@ wheels = [
 
 [[package]]
 name = "hydra-orm"
-version = "0.1.0"
-source = { git = "https://github.com/reepoi/hydra-orm#c78d229ff1fc4a0b14f219c1fb1205753528eec4" }
+version = "0.1.1"
+source = { git = "https://github.com/reepoi/hydra-orm#f6abf6a2a48c04b1b81554e80c54acd31f14a032" }
 dependencies = [
     { name = "hydra-core" },
     { name = "pytest" },
