@@ -29,12 +29,11 @@ class TimeStepProgressBar(pl.callbacks.TQDMProgressBar):
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module) -> None:
         super().on_train_epoch_start(trainer)
         time_step = pl_module.dataset.time_step
-        time_step_to_estimate = time_step + 1
         if self.cfg.model.train_on_initial_predicted_state and time_step == 0 and trainer.current_epoch == 0:
             estimation_message = f'Training on initial predicted state without observation at time step {time_step}/{self.cfg.dataset.time_step_count - self.cfg.dataset.time_step_count_drop_first}'
         else:
             ignore_observations_text = ' without observation' if self.cfg.model.ignore_observations else ''
-            estimation_message = f'Training{ignore_observations_text} to estimate state at time step {time_step_to_estimate}/{self.cfg.dataset.time_step_count}'
+            estimation_message = f'Training{ignore_observations_text} to estimate state at time step {time_step + 1}/{self.cfg.dataset.time_step_count - self.cfg.dataset.time_step_count_drop_first}'
         self.train_progress_bar.set_description(f'{estimation_message}. Epochs={self.cfg.model.epoch_count}, Batches={math.ceil(self.cfg.dataset.predicted_state_count / self.cfg.model.batch_size)}')
 
 
@@ -93,7 +92,7 @@ class SaveTrajectories(pl.callbacks.Callback):
         data['observation'] = pd.DataFrame(
             data['observation'].cpu().numpy(),
             index=range(data['observation'].shape[0]),
-            columns=[f'observation_dim_{d}' for d in range(dim)],
+            columns=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
         )
         data['times'] = pd.DataFrame(
             data['times'].cpu().numpy(),

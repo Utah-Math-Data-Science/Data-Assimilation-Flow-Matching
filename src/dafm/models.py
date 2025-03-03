@@ -96,9 +96,9 @@ class ScoreMatching(Model):
 
     def get_optimizer(self, time_step, ignore_observation):
         if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
-            lr = 5e-3
+            lr = self.cfg.learning_rate_when_training_on_initial_predicted_state
         else:
-            lr = 1e-2
+            lr = self.cfg.learning_rate
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def sigma(self, t):
@@ -194,9 +194,9 @@ class FlowMatching(Model):
 
     def get_optimizer(self, time_step, ignore_observation):
         if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
-            lr = 5e-3
+            lr = self.cfg.learning_rate_when_training_on_initial_predicted_state
         else:
-            lr = 1e-2
+            lr = self.cfg.learning_rate
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     def sigma(self, t):

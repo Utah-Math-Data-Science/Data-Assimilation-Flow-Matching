@@ -24,6 +24,8 @@ class Trainable(Model):
     use_batch_norm: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
     train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+    learning_rate_when_training_on_initial_predicted_state: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5e-3)
+    learning_rate: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-2)
     resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     train_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)

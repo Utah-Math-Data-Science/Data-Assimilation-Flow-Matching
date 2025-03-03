@@ -1,0 +1,5 @@
+defaults:
+  - ScoreMatchingLorenz96
+  - _self_
+
+learning_rate_when_training_on_initial_predicted_state: 1e-3

@@ -5,6 +5,7 @@ from einops import rearrange, reduce, unpack
 import torch
 from torch.utils.data.dataset import IterableDataset
 from tqdm import tqdm
+from torchdiffeq import odeint
 
 import conf.datasets
 import dafm.observe
@@ -32,7 +33,7 @@ class Dataset:
 
         predicted_state_initial_condition_noise = torch.randn((cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
         true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.data['true_state'][0].shape), device=device) * cfg.model_std
-        observation_noise = torch.randn((self.data['times'].shape[0], *self.data['true_state'][0].shape), device=device) * cfg.observation_std
+        observation_noise = torch.randn((self.data['times'].shape[0], *self.observe(self.data['true_state'][0]).shape), device=device) * cfg.observation_std
         self.predicted_state_noise = torch.randn((self.times.shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_std
 
         for time_step, t in enumerate(times_from_zero[:-1]):
@@ -133,12 +134,25 @@ class Lorenz96(Dataset):
         return (x_p1 - x_m2) * x_m1 - x + self.cfg.forcing
 
     def true_state_step(self, time_step, t, true_state, model_noise):
-        if time_step > 0 and time_step % 30 == 0:
-            true_state = true_state + torch.randn_like(true_state) * 3.
-        next_true_state = euler_maruyama(
-            self.cfg.time_step_size, t, true_state, self.dynamics, model_noise
-        )
+        # if time_step > 0 and time_step % 30 == 0:
+        #     true_state = true_state + torch.randn_like(true_state) * 3.
+        # next_true_state = euler_maruyama(
+        #     self.cfg.time_step_size, t, true_state, self.dynamics, model_noise
+        # )
+        times = torch.tensor([t, t + self.cfg.time_step_size], device=true_state.device)
+        next_true_state = odeint(
+            self.dynamics, true_state, times,
+            method='rk4', options=dict(step_size=self.cfg.time_step_size),
+        )[-1]
         return next_true_state
+
+    def predict(self, time_step, t, sampled_state):
+        times = torch.tensor([t, t + self.cfg.time_step_size], device=sampled_state.device)
+        next_predicted_state = odeint(
+            self.dynamics, sampled_state, times,
+            method='rk4', options=dict(step_size=self.cfg.time_step_size),
+        )[-1]
+        return next_predicted_state
 
 
 class PredictedStatesAndObservation(IterableDataset):
@@ -155,7 +169,12 @@ class PredictedStatesAndObservation(IterableDataset):
                 if self.model.cfg.resample_initial_predicted_state:
                     sampled_state = self.model.sample(predicted_state, None, self.dataset.observe)
                     self.dataset.data['predicted_state'][0] = sampled_state
-        for time_step, t, predicted_state, next_observation, ignore_observation in tqdm(self.dataset, total=self.dataset.cfg.time_step_count, desc='Estimating state at time step', initial=1):
+        for time_step, t, predicted_state, next_observation, ignore_observation in tqdm(
+           self.dataset,
+           total=self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first,
+           initial=1,
+           desc='Estimating state at time step',
+        ):
             self.time_step = time_step
             next_predicted_state = self.dataset.predict(time_step, t, predicted_state)
             # log.info('next_predicted_state mean: %s', reduce(
