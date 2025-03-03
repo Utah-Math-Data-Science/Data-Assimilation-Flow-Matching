@@ -105,6 +105,7 @@ class ScoreMatching(Model):
         """
         Eqn.(30) of [1]_ modified to be continuous as t -> 0.
         But, we divide by 2*log(sigma_max/sigma_min)? Why?
+        This division does simplify the experssion of g**2 when sampling.
 
         References
         ----------
