@@ -1,7 +1,12 @@
 defaults:
   - _Lorenz96
+  - override observe: Exponentiate
   - _self_
 
+observe:
+  exponent: 3
+predicted_state_count: 10000
 time_step_count: 100
 time_step_count_drop_first: 0
 time_step_size: .01
+state_perturbation: BAO_ET_AL_LORENZ_96

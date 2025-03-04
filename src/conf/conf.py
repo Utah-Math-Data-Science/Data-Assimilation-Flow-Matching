@@ -46,7 +46,7 @@ sa.event.listens_for(Conf, 'before_insert')(
 
 
 orm.store_config(Conf)
-orm.store_config(datasets.DoubleWell, group=Conf.dataset.key)
+orm.store_config(datasets.DoubleWell, group=Conf.dataset.key, name=f'_{datasets.DoubleWell.__name__}')
 orm.store_config(datasets.Lorenz63, group=Conf.dataset.key, name=f'_{datasets.Lorenz63.__name__}')
 orm.store_config(datasets.Lorenz96, group=Conf.dataset.key, name=f'_{datasets.Lorenz96.__name__}')
 orm.store_config(observe.Full, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')

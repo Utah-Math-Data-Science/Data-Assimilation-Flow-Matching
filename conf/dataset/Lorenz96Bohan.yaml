@@ -15,6 +15,7 @@ true_state_initial_condition_mean: 5.
 true_state_initial_condition_std: 1.
 predicted_state_initial_condition_std: .1
 observe_every_n_time_steps: 5
+integrator: RUNGE_KUTTA_4
 model_std: 0.
 predicted_state_model_std: 0.
 # .7, 1.

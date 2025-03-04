@@ -19,7 +19,7 @@ def euler_maruyama(dt, t, x, f, noise):
 
 
 class Dataset:
-    def __init__(self, cfg, observe, device):
+    def __init__(self, cfg, observe, state_perturbation, device):
         self.cfg = cfg
         self.observe = observe
         self.device = device
@@ -28,18 +28,20 @@ class Dataset:
         time_step_indices, times_from_zero = self.time_steps_and_times(cfg, device)
         times_to_keep = time_step_indices >= self.cfg.time_step_count_drop_first
         self.data['times'] = times_from_zero[times_to_keep]
-        self.times = self.data['times'][:-1]
         self.data['true_state'].append(self.initialize_true_state(cfg, device))
 
         predicted_state_initial_condition_noise = torch.randn((cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
         true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.data['true_state'][0].shape), device=device) * cfg.model_std
         observation_noise = torch.randn((self.data['times'].shape[0], *self.observe(self.data['true_state'][0]).shape), device=device) * cfg.observation_std
-        self.predicted_state_noise = torch.randn((self.times.shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_std
+        self.predicted_state_noise = torch.randn((self.data['times'][:-1].shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_std
 
-        for time_step, t in enumerate(times_from_zero[:-1]):
+        for time_step, t_now_and_next in enumerate(times_from_zero.unfold(0, 2, 1)):
+            true_state = self.data['true_state'][-1]
+            true_state = state_perturbation(time_step, true_state)
             self.data['true_state'].append(
-                self.true_state_step(time_step, t, self.data['true_state'][-1], true_state_noise[time_step])
+                self._step_state(time_step, t_now_and_next, true_state, true_state_noise[time_step])
             )
+
         self.data['true_state'] = rearrange(
             self.data['true_state'],
             't 1 dim -> t 1 dim'
@@ -63,19 +65,32 @@ class Dataset:
     def dynamics(self, t, x):
         raise NotImplementedError()
 
-    def true_state_step(self, time_step, t, true_state, model_noise):
-        raise NotImplementedError()
+    def _step_state(self, time_step, t_now_and_next, state, model_noise):
+        if self.cfg.integrator is conf.datasets.Integrator.RUNGE_KUTTA_4:
+            if self.cfg.model_std > 0:
+                raise ValueError(
+                    f'{self.cfg.integrator.name} is not a stochastic differential equation integrator.'
+                    'Please choose a different integrator (e.g., set dataset.integrator=EULER_MARUYAMA) or set dataset.model_std=0.'
+                )
+            next_state = odeint(
+                self.dynamics, state, rearrange(t_now_and_next, '1 times -> times'),
+                method='rk4', options=dict(step_size=self.cfg.time_step_size),
+            )[1]
+        elif self.cfg.integrator is conf.datasets.Integrator.EULER_MARUYAMA:
+            next_state = euler_maruyama(
+            self.cfg.time_step_size, t_now_and_next[:, :1], state, self.dynamics, model_noise
+            )
+        else:
+            raise ValueError(f'Unknown integrator: {self.cfg.integrator}')
+        return next_state
 
-    def predict(self, time_step, t, sampled_state):
-        next_predicted_state = euler_maruyama(
-            self.cfg.time_step_size, t, sampled_state, self.dynamics, self.predicted_state_noise[time_step]
-        )
-        return next_predicted_state
+    def predict(self, time_step, t_now_and_next, sampled_state):
+        return self._step_state(time_step, t_now_and_next, sampled_state, self.predicted_state_noise[time_step])
 
     def __iter__(self):
-        for time_step, t in enumerate(self.times):
+        for time_step, t_now_and_next in enumerate(self.data['times'].unfold(0, 2, 1)):
             ignore_observation = time_step % self.cfg.observe_every_n_time_steps != 0
-            yield time_step, t, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1], ignore_observation
+            yield time_step, t_now_and_next, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1], ignore_observation
         self.data['predicted_state'] = rearrange(
             self.data['predicted_state'],
             't predicted_state_count dim -> t predicted_state_count dim'
@@ -89,14 +104,6 @@ class DoubleWell(Dataset):
 
     def dynamics(self, t, x):
         return -4 * x * (x**2 - 1)
-
-    def true_state_step(self, time_step, t, true_state, model_noise):
-        if time_step > 0 and time_step % 20 == 0:
-            true_state = -true_state
-        next_true_state = euler_maruyama(
-            self.cfg.time_step_size, t, true_state, self.dynamics, model_noise
-        )
-        return next_true_state
 
 
 class Lorenz63(Dataset):
@@ -114,12 +121,6 @@ class Lorenz63(Dataset):
         ], 'dim state_count -> state_count dim')
         return dot_x / self.cfg.rescaling
 
-    def true_state_step(self, time_step, t, true_state, model_noise):
-        next_true_state = euler_maruyama(
-            self.cfg.time_step_size, t, true_state, self.dynamics, model_noise
-        )
-        return next_true_state
-
 
 class Lorenz96(Dataset):
     def initialize_true_state(self, cfg, device):
@@ -133,27 +134,6 @@ class Lorenz96(Dataset):
         x_m1 = x.roll(1, -1)
         return (x_p1 - x_m2) * x_m1 - x + self.cfg.forcing
 
-    def true_state_step(self, time_step, t, true_state, model_noise):
-        # if time_step > 0 and time_step % 30 == 0:
-        #     true_state = true_state + torch.randn_like(true_state) * 3.
-        # next_true_state = euler_maruyama(
-        #     self.cfg.time_step_size, t, true_state, self.dynamics, model_noise
-        # )
-        times = torch.tensor([t, t + self.cfg.time_step_size], device=true_state.device)
-        next_true_state = odeint(
-            self.dynamics, true_state, times,
-            method='rk4', options=dict(step_size=self.cfg.time_step_size),
-        )[-1]
-        return next_true_state
-
-    def predict(self, time_step, t, sampled_state):
-        times = torch.tensor([t, t + self.cfg.time_step_size], device=sampled_state.device)
-        next_predicted_state = odeint(
-            self.dynamics, sampled_state, times,
-            method='rk4', options=dict(step_size=self.cfg.time_step_size),
-        )[-1]
-        return next_predicted_state
-
 
 class PredictedStatesAndObservation(IterableDataset):
     def __init__(self, dataset, model):
@@ -163,26 +143,26 @@ class PredictedStatesAndObservation(IterableDataset):
 
     def __iter__(self):
         if self.model.cfg.train_on_initial_predicted_state:
-            for _, (time_step, t, predicted_state, next_observation, _) in zip(range(1), self.dataset):
+            for _, (time_step, t_now_and_next, predicted_state, next_observation, _) in zip(range(1), self.dataset):
                 self.time_step = time_step
-                yield time_step, t, predicted_state, next_observation, True
+                yield time_step, t_now_and_next, predicted_state, next_observation, True
                 if self.model.cfg.resample_initial_predicted_state:
                     sampled_state = self.model.sample(predicted_state, None, self.dataset.observe)
                     self.dataset.data['predicted_state'][0] = sampled_state
-        for time_step, t, predicted_state, next_observation, ignore_observation in tqdm(
+        for time_step, t_now_and_next, predicted_state, next_observation, ignore_observation in tqdm(
            self.dataset,
            total=self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first,
            initial=1,
            desc='Estimating state at time step',
         ):
             self.time_step = time_step
-            next_predicted_state = self.dataset.predict(time_step, t, predicted_state)
+            next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
             # log.info('next_predicted_state mean: %s', reduce(
             #     next_predicted_state,
             #     'predicted_state_count dim ->', 'mean'
             # ).item())
             if not ignore_observation or self.model.cfg.train_when_ignoring_observation:
-                yield time_step, t, next_predicted_state, next_observation, ignore_observation
+                yield time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
             if self.model.cfg.resample_predicted_state_when_ignoring_observation:
                 sampled_state = self.model.sample(next_predicted_state, next_observation)
             else:
@@ -195,13 +175,33 @@ class PredictedStatesAndObservation(IterableDataset):
             self.dataset.data['predicted_state'].append(sampled_state)
 
 
+def get_state_perturbation(state_perturbation):
+    if state_perturbation is conf.datasets.StatePerturbation.IDENTITY:
+        return lambda _, x: x
+    elif state_perturbation is conf.datasets.StatePerturbation.BAO_ET_AL_DOUBLE_WELL:
+        def _perturb(time_step, state):
+            if time_step > 0 and time_step % 20 == 0:
+                state = -state
+            return state
+        return _perturb
+    elif state_perturbation is conf.datasets.StatePerturbation.BAO_ET_AL_LORENZ_96:
+        def _perturb(time_step, state):
+            if time_step == 30 or time_step == 60:
+                state = state + torch.randn_like(state) * 3.
+            return state
+        return _perturb
+    else:
+        raise ValueError(f'Unknown state perturbation: {state_perturbation}')
+
+
 def get_dynamics_dataset(cfg, device):
     observe = dafm.observe.get_observe(cfg)
+    state_perturbation = get_state_perturbation(cfg.state_perturbation)
     if isinstance(cfg, conf.datasets.DoubleWell):
-        return DoubleWell(cfg, observe, device)
+        return DoubleWell(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.Lorenz63):
-        return Lorenz63(cfg, observe, device)
+        return Lorenz63(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.Lorenz96):
-        return Lorenz96(cfg, observe, device)
+        return Lorenz96(cfg, observe, state_perturbation, device)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

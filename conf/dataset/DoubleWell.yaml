@@ -1,0 +1,5 @@
+defaults:
+  - _DoubleWell
+  - _self_
+
+state_perturbation: BAO_ET_AL_DOUBLE_WELL

@@ -1,3 +1,5 @@
+import enum
+
 from typing import List, Any
 from dataclasses import field
 
@@ -7,6 +9,17 @@ from hydra_orm import orm
 import sqlalchemy as sa
 
 import conf.observe
+
+
+class Integrator(enum.Enum):
+    RUNGE_KUTTA_4 = enum.auto()
+    EULER_MARUYAMA = enum.auto()
+
+
+class StatePerturbation(enum.Enum):
+    IDENTITY = enum.auto()
+    BAO_ET_AL_DOUBLE_WELL = enum.auto()
+    BAO_ET_AL_LORENZ_96 = enum.auto()
 
 
 class Dataset(orm.InheritableTable):
@@ -20,6 +33,8 @@ class Dataset(orm.InheritableTable):
     time_step_size: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.1)
     observe_every_n_time_steps: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
     observe: conf.observe.Observe = orm.OneToManyField(conf.observe.Observe, default=omegaconf.MISSING)
+    integrator: Integrator = orm.make_field(orm.ColumnRequired(sa.Enum(Integrator)), default=Integrator.EULER_MARUYAMA)
+    state_perturbation: StatePerturbation = orm.make_field(orm.ColumnRequired(sa.Enum(StatePerturbation)), default=StatePerturbation.IDENTITY)
 
 
 class DoubleWell(Dataset):
@@ -50,7 +65,7 @@ class Lorenz96(Dataset):
     observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.5)
     true_state_initial_condition_mean: float = orm.make_field(orm.ColumnRequired(sa.Double), default=4.)
     true_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=2.)
-    predicted_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.2)
+    predicted_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.5)
     predicted_state_model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)
 
     state_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=10)
