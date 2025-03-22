@@ -273,7 +273,7 @@ class FlowMatching(Model):
 
         diffusion_time = torch.rand((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, 1), device=state.device)
         if self.cfg.use_expectation_of_sum:
-            diffusion_time = repeat(diffusion_time, 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count),
+            diffusion_time = repeat(diffusion_time, 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count)
 
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
             path_context = self.path_conditional_optimal_transport(diffusion_time, state, noise)
