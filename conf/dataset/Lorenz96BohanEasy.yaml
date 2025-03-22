@@ -1,0 +1,10 @@
+defaults:
+  - _Lorenz96
+  - _self_
+
+predicted_state_count: 500
+time_step_count: 100
+state_dimension: 10
+model_std: 0.
+observation_std: .1
+predicted_state_model_std: 0.
