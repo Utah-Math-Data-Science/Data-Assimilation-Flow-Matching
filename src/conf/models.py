@@ -66,7 +66,8 @@ class FlowMatching(Trainable):
 
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.HEUN)
-    loss_sample_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
+    use_expectation_of_sum: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    loss_expectation_sample_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
     softmax_loss_weighting: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     sampling_use_observation_likelihood: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     sampling_use_observation_likelihood_score: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)

@@ -53,9 +53,9 @@ To train the flow matching filter, run
 
 .. code:: bash
 
-   python src/dafm/main.py model=FlowMatching dataset=DoubleWell model.train_on_initial_predicted_state=true model.loss_sample_count=1000
+   python src/dafm/main.py model=FlowMatching dataset=DoubleWell model.train_on_initial_predicted_state=true model.loss_expectation_sample_count=1000
 
-The override ``model.loss_sample_count`` is the number of time-noise pairs ``(t, noise)`` to sample for estimating the expected value in the weighted conditional flow matching loss.
+The override ``model.loss_expectation_sample_count`` is the number of time-noise pairs ``(t, noise)`` to sample for estimating the expected value in the weighted conditional flow matching loss.
 
 After training, a ``trajectories.parquet`` containing the trajectories of the true system state, the observations, and the predicted system states will be saved to ``<out_dir>/runs/<alt_id>``.
 The ``<alt_id>`` is the identifier of the training run, and can be used to visualize the data in ``trajectories.parquet`` using the Jupyter notebooks in ``notebooks``.

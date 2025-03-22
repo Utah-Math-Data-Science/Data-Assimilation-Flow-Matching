@@ -225,85 +225,116 @@ class FlowMatching(Model):
             / np.log(self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)
         )**(1/2)
 
+    def path_conditional_optimal_transport(self, diffusion_time, state, noise):
+        mean = state * diffusion_time
+        std = 1 - diffusion_time
+        noise_flowed_to_t = mean + noise * std
+        eps = 1e-6
+        dx_target_velocity = -1 / (std + eps)
+        dx_log_pt = -(noise_flowed_to_t - mean) / (std + eps)**2
+        target_velocity = state - noise
+        diffusion_path_weighting = 1.
+        return dict(
+            mean=mean, std=std,
+            noise_flowed_to_t=noise_flowed_to_t,
+            target_velocity=target_velocity,
+            dx_target_velocity=dx_target_velocity,
+            dx_log_pt=dx_log_pt,
+            diffusion_path_weighting=diffusion_path_weighting,
+        )
+
+    def path_variance_exploding(self, diffusion_time, state, noise):
+        mean = state
+        std = self.sigma(1 - diffusion_time)
+        noise_flowed_to_t = mean + noise * std
+        dt_std = self.dsigma(1 - diffusion_time)
+        dx_target_velocity = -dt_std / std
+        dx_log_pt = -(noise_flowed_to_t - mean) / std**2
+        target_velocity = dx_target_velocity * (noise_flowed_to_t - mean)
+        diffusion_path_weighting = 1 / dt_std**2
+        return dict(
+            mean=mean, std=std,
+            noise_flowed_to_t=noise_flowed_to_t,
+            target_velocity=target_velocity,
+            dx_target_velocity=dx_target_velocity,
+            dx_log_pt=dx_log_pt,
+            diffusion_path_weighting=diffusion_path_weighting,
+        )
+
     def loss(self, state, observation, observe):
-        batch_size = self.cfg.loss_sample_count
-        if batch_size != 1 and batch_size != state.shape[0]:
-            # model.batch_size <= predicted_state_count
-            raise ValueError(f'model.loss_sample_count can only be 1 or model.batch_size={state.shape[0]}, not {batch_size}.')
-        noise = rearrange(torch.randn_like(state[:batch_size]), 'batch dim -> batch 1 dim')
+        predicted_state_count, dim = state.shape
+        if self.cfg.use_expectation_of_sum:
+            time_noise_samples_per_expectation_sample = 1
+        else:
+            time_noise_samples_per_expectation_sample = predicted_state_count
+
+        noise = torch.randn((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, dim), device=state.device)
         state = rearrange(state, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
+        diffusion_time = torch.rand((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, 1), device=state.device)
+        if self.cfg.use_expectation_of_sum:
+            diffusion_time = repeat(diffusion_time, 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count),
+
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            diffusion_time = torch.rand((batch_size, 1, 1), device=state.device)
-            mean = state * rearrange(diffusion_time, 'batch 1 1 -> 1 batch 1')
-            std = 1 - diffusion_time
-            noise_flowed_to_t = mean + noise * std
-            eps = 1e-6
-            dx_target_velocity = -1 / (std + eps)
-            dx_log_pt = -(noise_flowed_to_t - mean) / (std + eps)**2
-            target_velocity = state - noise
-            diffusion_path_weighting = 1.
+            path_context = self.path_conditional_optimal_transport(diffusion_time, state, noise)
         elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            diffusion_time = torch.rand((batch_size, 1, 1), device=state.device) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
-            mean = state
-            std = self.sigma(1 - diffusion_time)
-            noise_flowed_to_t = mean + noise * std
-            dt_std = self.dsigma(1 - diffusion_time)
-            dx_target_velocity = -dt_std / std
-            dx_log_pt = -(noise_flowed_to_t - mean) / std**2
-            target_velocity = dx_target_velocity * (noise_flowed_to_t - mean)
-            diffusion_path_weighting = 1 / dt_std**2
+            diffusion_time = diffusion_time * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+            path_context = self.path_variance_exploding(diffusion_time, state, noise)
         else:
             raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
 
         if self.cfg.use_divergence_matching:
-            hutchinson_noise = torch.randn((batch_size * state.shape[1], state.shape[2]), device=state.device)
+            hutchinson_noise = torch.randn((self.cfg.loss_expectation_sample_count * predicted_state_count, dim), device=state.device)
             predicted_velocity, predicted_velocity_jvp = torch.autograd.functional.jvp(
                 lambda xt: self(
-                    repeat(diffusion_time, 'batch 1 1 -> (repeat batch) 1', repeat=batch_size),
+                    rearrange(diffusion_time, 'loss_expectation_sample_count predicted_state_count 1 -> (loss_expectation_sample_count predicted_state_count) 1'),
                     xt
                 ),
-                rearrange(noise_flowed_to_t, 'batch predicted_state_count dim -> (batch predicted_state_count) dim'),
+                rearrange(path_context['noise_flowed_to_t'], 'loss_expectation_sample_count predicted_state_count dim -> (loss_expectation_sample_count predicted_state_count) dim'),
                 hutchinson_noise,
                 create_graph=True,
             )
             predicted_velocity, predicted_velocity_jvp, hutchinson_noise = map(
-                lambda x: rearrange(x, '(batch predicted_state_count) dim -> batch predicted_state_count dim', batch=batch_size),
+                lambda x: rearrange(
+                    x,
+                    '(loss_expectation_sample_count predicted_state_count) dim -> loss_expectation_sample_count predicted_state_count dim',
+                    loss_expectation_sample_count=self.cfg.loss_expectation_sample_count
+                ),
                 (predicted_velocity, predicted_velocity_jvp, hutchinson_noise)
             )
             predicted_divergence = utils.inner_product(hutchinson_noise, predicted_velocity_jvp)
             if self.cfg.divergence_matching_use_hutchinson_trace_for_target_divergence:
                 target_divergence = (
-                    utils.inner_product(hutchinson_noise * dx_target_velocity, hutchinson_noise)
-                    + utils.inner_product(hutchinson_noise, target_velocity - predicted_velocity) * utils.inner_product(dx_log_pt, hutchinson_noise)
+                    utils.inner_product(hutchinson_noise * path_context['dx_target_velocity'], hutchinson_noise)
+                    + utils.inner_product(hutchinson_noise, path_context['target_velocity'] - predicted_velocity) * utils.inner_product(path_context['dx_log_pt'], hutchinson_noise)
                 )
             else:
                 target_divergence = (
-                    dx_target_velocity.reshape(batch_size, -1).sum(-1, keepdim=True)
-                    + utils.inner_product(target_velocity, dx_log_pt)
-                    - utils.inner_product(predicted_velocity, dx_log_pt)
+                    path_context['dx_target_velocity'].reshape(self.cfg.loss_expectation_sample_count, -1).sum(-1, keepdim=True)
+                    + utils.inner_product(path_context['target_velocity'], path_context['dx_log_pt'])
+                    - utils.inner_product(predicted_velocity, path_context['dx_log_pt'])
                 )
 
-            divergence_matching_weighting = 1 / dx_target_velocity.abs() / (predicted_velocity.shape[1] * predicted_velocity.shape[2])
+            divergence_matching_weighting = 1 / path_context['dx_target_velocity'].abs() / (predicted_state_count * dim)
             divergence_matching_loss = self.cfg.divergence_matching_loss_coefficient * (
                 divergence_matching_weighting * (target_divergence - predicted_divergence).abs()
             ).mean()
         else:
             predicted_velocity = rearrange(
                 self(
-                    repeat(diffusion_time, 'batch 1 1 -> (repeat batch) 1', repeat=batch_size),
-                    rearrange(noise_flowed_to_t, 'batch predicted_state_count dim -> (batch predicted_state_count) dim')
+                    rearrange(diffusion_time, 'loss_expectation_sample_count predicted_state_count 1 -> (loss_expectation_sample_count predicted_state_count) 1'),
+                    rearrange(path_context['noise_flowed_to_t'], 'loss_expectation_sample_count predicted_state_count dim -> (loss_expectation_sample_count predicted_state_count) dim')
                 ),
-                '(batch predicted_state_count) dim -> batch predicted_state_count dim',
-                batch=batch_size
+                '(loss_expectation_sample_count predicted_state_count) dim -> loss_expectation_sample_count predicted_state_count dim',
+                loss_expectation_sample_count=self.cfg.loss_expectation_sample_count
             )
             divergence_matching_loss = 0.
 
         if observation is None or self.cfg.ignore_observations:
             weighting = 1.
             flow_loss = reduce(
-                weighting * diffusion_path_weighting * (predicted_velocity - target_velocity)**2,
-                'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
+                weighting * path_context['diffusion_path_weighting'] * (predicted_velocity - path_context['target_velocity'])**2,
+                'loss_expectation_sample_count predicted_state_count dim -> loss_expectation_sample_count predicted_state_count', 'sum'
             ).mean()
         else:
             weighting_argument = -0.5 * reduce(
@@ -315,8 +346,8 @@ class FlowMatching(Model):
             else:
                 weighting = torch.exp(weighting_argument)
             flow_loss = reduce(
-                weighting * diffusion_path_weighting * (predicted_velocity - target_velocity)**2,
-                'batch predicted_state_count dim -> batch predicted_state_count', 'sum'
+                weighting * path_context['diffusion_path_weighting'] * (predicted_velocity - path_context['target_velocity'])**2,
+                'loss_expectation_sample_count predicted_state_count dim -> loss_expectation_sample_count predicted_state_count', 'sum'
             ).sum(1).mean()
 
         return dict(
