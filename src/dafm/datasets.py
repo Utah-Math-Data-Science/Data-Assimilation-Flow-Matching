@@ -67,10 +67,10 @@ class Dataset:
 
     def _step_state(self, time_step, t_now_and_next, state, model_noise):
         if self.cfg.integrator is conf.datasets.Integrator.RUNGE_KUTTA_4:
-            if self.cfg.model_std > 0:
+            if self.cfg.model_std > 0 or self.cfg.predicted_state_model_std > 0:
                 raise ValueError(
                     f'{self.cfg.integrator.name} is not a stochastic differential equation integrator.'
-                    'Please choose a different integrator (e.g., set dataset.integrator=EULER_MARUYAMA) or set dataset.model_std=0.'
+                    'Please choose a different integrator (e.g., set dataset.integrator=EULER_MARUYAMA) or set dataset.model_std=0 and dataset.predicted_state_model_std=0.'
                 )
             next_state = odeint(
                 self.dynamics, state, rearrange(t_now_and_next, '1 times -> times'),
