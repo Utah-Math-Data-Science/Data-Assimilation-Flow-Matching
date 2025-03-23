@@ -2,9 +2,15 @@ defaults:
   - _Lorenz96
   - _self_
 
-predicted_state_count: 500
-time_step_count: 100
 state_dimension: 10
+predicted_state_count: 500
+time_step_count: 1100
+time_step_count_drop_first: 1000
+time_step_size: .03
+true_state_initial_condition_mean: 5.
+true_state_initial_condition_std: 1.
+predicted_state_initial_condition_std: .1
+integrator: RUNGE_KUTTA_4
 model_std: 0.
 observation_std: .1
 predicted_state_model_std: 0.
