@@ -261,6 +261,59 @@ class FlowMatching(Model):
             diffusion_path_weighting=diffusion_path_weighting,
         )
 
+    # def loss_fm_original(self, state, observation, observe):
+    #     predicted_state_count, dim = state.shape
+    #
+    #     if observation is None or self.cfg.ignore_observations:
+    #         weighting = torch.full((predicted_state_count,), 1 / predicted_state_count, device=state.device)
+    #     else:
+    #         weighting_argument = -0.5 * reduce(
+    #             (observation[0] - observe(state))**2,
+    #             'predicted_state_count dim -> predicted_state_count', 'sum'
+    #         ) / self.observation_std**2
+    #         if self.cfg.softmax_loss_weighting:
+    #             weighting = torch.softmax(weighting_argument, dim=0)
+    #         else:
+    #             weighting = torch.exp(weighting_argument)
+    #     noise = torch.randn((self.cfg.loss_expectation_sample_count, dim), device=state.device)
+    #
+    #     sample_idx = torch.multinomial(
+    #         weighting, self.cfg.loss_expectation_sample_count,
+    #         replacement=True,
+    #     )
+    #     state = state[sample_idx]
+    #
+    #     diffusion_time = torch.rand((self.cfg.loss_expectation_sample_count, 1), device=state.device)
+    #
+    #     if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+    #         path_context = self.path_conditional_optimal_transport(diffusion_time, state, noise)
+    #     elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+    #         diffusion_time = diffusion_time * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+    #         path_context = self.path_variance_exploding(diffusion_time, state, noise)
+    #     else:
+    #         raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
+    #
+    #     predicted_velocity = rearrange(
+    #         self(
+    #             rearrange(diffusion_time, 'loss_expectation_sample_count 1 -> loss_expectation_sample_count 1'),
+    #             rearrange(path_context['noise_flowed_to_t'], 'loss_expectation_sample_count dim -> loss_expectation_sample_count dim')
+    #         ),
+    #         'loss_expectation_sample_count dim -> loss_expectation_sample_count dim',
+    #         loss_expectation_sample_count=self.cfg.loss_expectation_sample_count
+    #     )
+    #     divergence_matching_loss = 0.
+    #
+    #     flow_loss = reduce(
+    #         path_context['diffusion_path_weighting'] * (predicted_velocity - path_context['target_velocity'])**2,
+    #         'loss_expectation_sample_count dim -> loss_expectation_sample_count', 'sum'
+    #     ).mean()
+    #
+    #     return dict(
+    #         loss=flow_loss + divergence_matching_loss,
+    #         flow_loss=flow_loss,
+    #         divergence_matching_loss=divergence_matching_loss,
+    #     )
+
     def loss(self, state, observation, observe):
         predicted_state_count, dim = state.shape
         if self.cfg.use_expectation_of_sum:
