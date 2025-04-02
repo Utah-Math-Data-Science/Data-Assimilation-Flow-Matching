@@ -37,10 +37,10 @@ class MonteCarlo(EnergyGuidance):
             1,
         )
         log_pt_xt_given_z = rearrange(
-                conditional_distribution.log_prob(
-                    rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
-                ),
-                'monte_carlo_sample_count predicted_state_count -> monte_carlo_sample_count predicted_state_count 1',
+            conditional_distribution.log_prob(
+                rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
+            ),
+            'monte_carlo_sample_count predicted_state_count -> monte_carlo_sample_count predicted_state_count 1',
         )
         log_samples = torch.tensor(xt.shape[0], device=xt.device).log()
         log_pt_x = reduce(
@@ -77,8 +77,8 @@ class Local(EnergyGuidance):
         super().__init__(cfg)
         self.scheduler = scheduler
 
-    def forward(self, t, state, dot_state_unguided, energy_function):
-        x1_predicted = state + (1 - t) * dot_state_unguided
+    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
+        x1_predicted = xt + (1 - t) * dot_xt_unguided
         with torch.enable_grad():
             x1_predicted.requires_grad_()
             grad_energy, *_ = torch.autograd.grad(
@@ -94,4 +94,4 @@ def get_guidance(cfg):
     elif isinstance(cfg, flow_matching_guidance.MonteCarlo):
         return MonteCarlo(cfg)
     elif isinstance(cfg, flow_matching_guidance.Local):
-        return Local(cfg, scheduler)
+        return Local(cfg, lambda t: 1)
