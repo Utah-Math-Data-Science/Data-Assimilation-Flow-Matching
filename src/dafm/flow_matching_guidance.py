@@ -94,4 +94,4 @@ def get_guidance(cfg):
     elif isinstance(cfg, flow_matching_guidance.MonteCarlo):
         return MonteCarlo(cfg)
     elif isinstance(cfg, flow_matching_guidance.Local):
-        return Local(cfg, lambda t: 1)
+        return Local(cfg, lambda t: 2)
