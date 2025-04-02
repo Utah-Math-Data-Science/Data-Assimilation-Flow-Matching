@@ -8,6 +8,7 @@ from hydra_orm import orm
 import sqlalchemy as sa
 
 from conf import diffusion_path as diff_path
+from conf import flow_matching_guidance
 
 
 class Model(orm.InheritableTable):
@@ -61,6 +62,7 @@ class ScoreMatching(Trainable):
 class FlowMatching(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(diffusion_path=omegaconf.MISSING),
+        dict(guidance=omegaconf.MISSING),
         '_self_',
     ])
 
@@ -77,3 +79,5 @@ class FlowMatching(Trainable):
     use_divergence_matching: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     divergence_matching_loss_coefficient: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-4)
     divergence_matching_use_hutchinson_trace_for_target_divergence: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+
+    guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)

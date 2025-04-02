@@ -7,7 +7,7 @@ from einops import rearrange, reduce, repeat
 
 import conf.models
 import conf.diffusion_path
-from dafm import utils
+from dafm import flow_matching_guidance, utils
 
 
 log = logging.getLogger(__file__)
@@ -189,6 +189,10 @@ class ScoreMatching(Model):
 
 
 class FlowMatching(Model):
+    def __init__(self, cfg, state_dimension, observation_std, guidance):
+        super().__init__(cfg, state_dimension, observation_std)
+        self.guidance = guidance
+
     def forward(self, time, state):
         return super().forward(time, state)
 
@@ -430,19 +434,23 @@ class FlowMatching(Model):
         time_step_size = diffusion_times[1] - diffusion_times[0]
 
         if (
-            self.cfg.sampling_use_observation_likelihood
-            and observation is not None
+            observation is not None
             and not self.cfg.ignore_observations
         ):
-            raise NotImplementedError()
-            dot_state = lambda t, x: (
-                self(t, x)
-                + self.observation_likelihood_vector_field_damping(t) * (
-                    (observation - x) / (1 - t)
+            noise = state
+            def dot_state(t, x):
+                dot_state_unguided = self(t, x)
+                return dot_state_unguided + self.guidance(
+                    t, x, noise, current_states, dot_state_unguided,
+                    energy_function=lambda x1_predicted: reduce(
+                        (observe(x1_predicted) - observation).pow(2),
+                        'predicted_state_count dim -> predicted_state_count 1',
+                        'sum'
+                    )
                 )
-            ) / 2
         else:
             dot_state = self
+
         for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 state = state + time_step_size * dot_state(t_now, state)
@@ -489,6 +497,7 @@ def get_model(cfg, state_dimension, observation_std):
     if isinstance(cfg, conf.models.ScoreMatching):
         return ScoreMatching(cfg, state_dimension, observation_std)
     elif isinstance(cfg, conf.models.FlowMatching):
-        return FlowMatching(cfg, state_dimension, observation_std)
+        guidance = flow_matching_guidance.get_guidance(cfg.guidance)
+        return FlowMatching(cfg, state_dimension, observation_std, guidance)
     else:
         raise ValueError(f'Unknown model: {cfg}')
