@@ -58,7 +58,6 @@ class ScoreMatching(Trainable):
             )
 
 
-
 class FlowMatching(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(diffusion_path=omegaconf.MISSING),
@@ -76,6 +75,26 @@ class FlowMatching(Trainable):
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
+    use_divergence_matching: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    divergence_matching_loss_coefficient: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-4)
+    divergence_matching_use_hutchinson_trace_for_target_divergence: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+
+    guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)
+
+
+class FlowMatchingMarginal(Trainable):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(diffusion_path=omegaconf.MISSING),
+        dict(guidance=omegaconf.MISSING),
+        '_self_',
+    ])
+
+    sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
+    sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.HEUN)
+
+    diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
+
+    train_conditional_vector_field_weights: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     use_divergence_matching: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     divergence_matching_loss_coefficient: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-4)
     divergence_matching_use_hutchinson_trace_for_target_divergence: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)

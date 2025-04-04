@@ -88,10 +88,18 @@ class Local(EnergyGuidance):
         return -self.scheduler(t) * grad_energy
 
 
+def get_schedule(cfg):
+    if isinstance(cfg, flow_matching_guidance.Constant):
+        return lambda t: cfg.constant
+    else:
+        raise ValueError(f'Unknown schedule: {cfg}')
+
+
 def get_guidance(cfg):
     if isinstance(cfg, flow_matching_guidance.No):
         return No(cfg)
     elif isinstance(cfg, flow_matching_guidance.MonteCarlo):
         return MonteCarlo(cfg)
     elif isinstance(cfg, flow_matching_guidance.Local):
-        return Local(cfg, lambda t: 2)
+        schedule = get_schedule(cfg.schedule)
+        return Local(cfg, schedule)

@@ -56,6 +56,8 @@ orm.store_config(models.ScoreMatching, group=Conf.model.key, name=f'_{models.Sco
 orm.store_config(flow_matching_guidance.No, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
 orm.store_config(flow_matching_guidance.MonteCarlo, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
 orm.store_config(flow_matching_guidance.Local, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
+orm.store_config(flow_matching_guidance.Constant, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}/{flow_matching_guidance.Local.schedule.key}')
 orm.store_config(models.FlowMatching, group=Conf.model.key, name=f'_{models.FlowMatching.__name__}')
+orm.store_config(models.FlowMatchingMarginal, group=Conf.model.key)#, name=f'_{models.FlowMatching.__name__}')
 orm.store_config(diffusion_path.ConditionalOptimalTransport, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')
 orm.store_config(diffusion_path.VarianceExploding, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')

@@ -1,3 +1,7 @@
+from typing import Any, List
+
+import omegaconf
+import hydra_orm
 from hydra_orm import orm
 import sqlalchemy as sa
 
@@ -15,5 +19,17 @@ class MonteCarlo(EnergyGuidance):
     time_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-3)
 
 
-class Local(EnergyGuidance):
+class Schedule(orm.InheritableTable):
     pass
+
+
+class Constant(Schedule):
+    constant: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1)
+
+
+class Local(EnergyGuidance):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(schedule=omegaconf.MISSING),
+        '_self_',
+    ])
+    schedule = orm.OneToManyField(Schedule, default=omegaconf.MISSING)

@@ -1,6 +1,7 @@
 defaults:
   - _FlowMatching
   - override diffusion_path: ConditionalOptimalTransport
+  - override guidance: 'No'
   - _self_
 
 batch_size: ${oc.select:..dataset.predicted_state_count,1}

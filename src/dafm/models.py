@@ -493,11 +493,133 @@ class FlowMatching(Model):
         return state_out
 
 
+class FlowMatchingMarginal(nn.Module):
+    def __init__(self, cfg, guidance):
+        super().__init__()
+        self.cfg = cfg
+        self.guidance = guidance
+
+    def get_optimizer(self, time_step, ignore_observation):
+        if self.cfg.train_conditional_vector_field_weights:
+            if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
+                lr = self.cfg.learning_rate_when_training_on_initial_predicted_state
+            else:
+                lr = self.cfg.learning_rate
+            return torch.optim.Adam(self.parameters(), lr=lr)
+        else:
+            return None
+
+    def forward(self, time, xt, x0, x1):
+        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            mean = x1 * time
+            std = 1 - time
+        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            raise NotImplementedError()
+            time = time * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+
+        conditional_distribution = torch.distributions.Independent(
+            torch.distributions.Normal(
+                loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
+                scale=std.clamp(min=1e-3)
+            ),
+            1,
+        )
+        log_pt_given_x1 = rearrange(
+            conditional_distribution.log_prob(
+                rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
+            ),
+            'particle_count predicted_state_count -> particle_count predicted_state_count 1',
+        )
+        weights = log_pt_given_x1.softmax(0) * xt.shape[0]
+        conditional_velocities = (
+            rearrange(x1, 'particle_count dim -> particle_count 1 dim')
+            - rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
+        ) / std.clamp(min=1e-3)
+        return reduce(
+            weights * conditional_velocities,
+            'particle_count predicted_state_count dim -> predicted_state_count dim',
+            'mean'
+        )
+
+    def loss(self, state, observation, observe):
+        return dict(loss=torch.tensor(0.))
+
+    @torch.no_grad
+    def sample(self, current_states, observation, observe, time_step_count=None):
+        time_step_count = time_step_count or self.cfg.sampling_time_step_count
+        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            diffusion_times = torch.linspace(0., 1., time_step_count, device=current_states.device)
+            state = torch.randn_like(current_states)
+        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            diffusion_times = torch.linspace(0., 1. - self.cfg.diffusion_path.time_min, time_step_count, device=current_states.device)
+            state = torch.randn_like(current_states) * self.sigma(1)
+        else:
+            raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
+        time_step_size = diffusion_times[1] - diffusion_times[0]
+
+        noise = state
+        if (
+            observation is not None
+            and not self.cfg.ignore_observations
+        ):
+            def dot_state(t, x):
+                dot_state_unguided = self(t, x, noise, current_states)
+                return dot_state_unguided + self.guidance(
+                    t, x, noise, current_states, dot_state_unguided,
+                    energy_function=lambda x1_predicted: reduce(
+                        (observe(x1_predicted) - observation).pow(2),
+                        'predicted_state_count dim -> predicted_state_count 1',
+                        'sum'
+                    )
+                )
+        else:
+            dot_state = lambda t, x: self(t, x, noise, current_states)
+
+        for t_now, t_next in zip(diffusion_times, diffusion_times[1:]):
+            if self.cfg.sampler is conf.models.Sampler.EULER:
+                state = state + time_step_size * dot_state(t_now, state)
+                state_out = state
+            elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+                if not isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+                    raise ValueError(
+                        f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {self.cfg.diffusion_path.__class__.__name__}.'
+                        ' Please use a different sampler (e.g., set model.sampler=EULER), or use a diffusion diffusion path (e.g., set model/diffusion_path=ConditionalOptimalTransport).'
+                    )
+                # this is sqrt(d/dt (self.sigma(t))^2) evaluated at 1 - t_now
+                g = self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**(1 - t_now)
+                if self.cfg.sampling_use_observation_likelihood_score:
+                    score = dot_state(t_now, state) / g**2
+                    if observation is None or self.cfg.ignore_observations:
+                        observation_score = 0.
+                    else:
+                        raise NotImplementedError('Need to use automatic differentiation to get the score')
+                        # this seems backwards; should it be (observation - state)? because we are given state?
+                        observation_score = -(state - observation) / self.observation_std**2
+                    score = score + observation_score * self.observation_likelihood_score_damping(1 - t_now)
+                    state_drift = state + g**2 * score * time_step_size
+                else:
+                    state_drift = state + time_step_size * dot_state(t_now, state)
+                state = state_drift + g * torch.randn_like(state) * time_step_size.sqrt()
+                state_out = state_drift
+            elif self.cfg.sampler is conf.models.Sampler.HEUN:
+                xdot_now = dot_state(t_now, state)
+                temp = state + time_step_size * xdot_now
+                state = state + time_step_size * (xdot_now + dot_state(t_next, temp)) / 2
+                state_out = state
+            else:
+                raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
+
+        return state_out
+
+
 def get_model(cfg, state_dimension, observation_std):
     if isinstance(cfg, conf.models.ScoreMatching):
         return ScoreMatching(cfg, state_dimension, observation_std)
     elif isinstance(cfg, conf.models.FlowMatching):
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
         return FlowMatching(cfg, state_dimension, observation_std, guidance)
+    elif isinstance(cfg, conf.models.FlowMatchingMarginal):
+        guidance = flow_matching_guidance.get_guidance(cfg.guidance)
+        return FlowMatchingMarginal(cfg, guidance)
     else:
         raise ValueError(f'Unknown model: {cfg}')

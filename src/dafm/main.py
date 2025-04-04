@@ -51,11 +51,13 @@ class DataAssimilation(pl.LightningModule):
 
     def training_step(self, batch, _):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
-        self.optimizer.zero_grad()
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
         next_observation = batch['next_observation'] if not batch['ignore_observation'] else None
         losses = self.model.loss(batch['next_predicted_state'], next_observation, self.dataset.dataset.observe)
-        self.manual_backward(losses['loss'])
-        self.optimizer.step()
+        if self.optimizer is not None:
+            self.manual_backward(losses['loss'])
+            self.optimizer.step()
         return losses
 
 
@@ -75,8 +77,8 @@ def main(cfg):
     trainer = pl.Trainer(
         # detect_anomaly=True,
         logger=logger,
-        max_epochs=cfg.model.epoch_count,
-        check_val_every_n_epoch=cfg.model.epoch_count,
+        max_epochs=None,
+        check_val_every_n_epoch=None,
         reload_dataloaders_every_n_epochs=1,
         deterministic=True,
         callbacks=[
