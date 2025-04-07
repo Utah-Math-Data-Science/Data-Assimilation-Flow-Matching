@@ -13,6 +13,7 @@ from conf import flow_matching_guidance
 
 class Model(orm.InheritableTable):
     ignore_observations: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class Trainable(Model):
@@ -29,7 +30,6 @@ class Trainable(Model):
     learning_rate: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-2)
     resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     train_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
-    resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class Sampler(enum.Enum):
@@ -95,6 +95,8 @@ class FlowMatchingMarginal(Trainable):
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
     train_conditional_vector_field_weights: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    use_velocity_of_conditional_flow_map: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    resample_noise_when_estimating_vector_field: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     use_divergence_matching: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     divergence_matching_loss_coefficient: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-4)
     divergence_matching_use_hutchinson_trace_for_target_divergence: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)

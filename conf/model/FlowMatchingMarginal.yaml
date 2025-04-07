@@ -1,0 +1,9 @@
+defaults:
+  - _FlowMatchingMarginal
+  - override diffusion_path: ConditionalOptimalTransport
+  - override guidance: Local
+  - override guidance/schedule: Constant
+  - _self_
+
+epoch_count: 1
+train_on_initial_predicted_state: false
