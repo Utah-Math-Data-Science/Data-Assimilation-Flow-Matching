@@ -143,12 +143,12 @@ class PredictedStatesAndObservation(IterableDataset):
 
     def __iter__(self):
         if self.model.cfg.train_on_initial_predicted_state:
-            for _, (time_step, t_now_and_next, predicted_state, next_observation, _) in zip(range(1), self.dataset):
-                self.time_step = time_step
-                yield time_step, t_now_and_next, predicted_state, next_observation, True
-                if self.model.cfg.resample_initial_predicted_state:
-                    sampled_state = self.model.sample(predicted_state, None, self.dataset.observe)
-                    self.dataset.data['predicted_state'][0] = sampled_state
+            time_step, t_now_and_next, predicted_state, next_observation, _ = next(iter(self.dataset))
+            self.time_step = time_step
+            yield time_step, t_now_and_next, predicted_state, next_observation, True
+            if self.model.cfg.resample_initial_predicted_state:
+                sampled_state = self.model.sample(predicted_state, None, self.dataset.observe)
+                self.dataset.data['predicted_state'][0] = sampled_state
         for time_step, t_now_and_next, predicted_state, next_observation, ignore_observation in tqdm(
            self.dataset,
            total=self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first,
@@ -163,11 +163,10 @@ class PredictedStatesAndObservation(IterableDataset):
             # ).item())
             if not ignore_observation or self.model.cfg.train_when_ignoring_observation:
                 yield time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
-            if self.model.cfg.resample_predicted_state_when_ignoring_observation:
-                sampled_state = self.model.sample(next_predicted_state, next_observation)
+            if not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation:
+                sampled_state = self.model.sample(next_predicted_state, next_observation, self.dataset.observe)
             else:
                 sampled_state = next_predicted_state
-            sampled_state = self.model.sample(next_predicted_state, next_observation, self.dataset.observe)
             # log.info('sampled_state mean: %s', reduce(
             #     sampled_state,
             #     'predicted_state_count dim ->', 'mean'
