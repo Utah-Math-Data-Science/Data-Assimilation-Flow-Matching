@@ -9,7 +9,7 @@ class EnergyGuidance:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    def forward(self, t, state, dot_state_unguided, energy_function):
+    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
         raise NotImplementedError()
 
     def __call__(self, *args, **kwargs):
@@ -17,7 +17,7 @@ class EnergyGuidance:
 
 
 class No(EnergyGuidance):
-    def forward(self, t, state, dot_state_unguided, energy_function):
+    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
         return 0.
 
 
