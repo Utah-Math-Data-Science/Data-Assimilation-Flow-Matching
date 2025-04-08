@@ -514,7 +514,17 @@ class FlowMatchingMarginal(nn.Module):
             x0 = torch.randn_like(x1)
         if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
             mean = x1 * time
-            std = 1 - (1 - 2e-6) * time
+            std = 1 - (1 - self.cfg.diffusion_path.sigma_min) * time
+            if self.cfg.use_velocity_of_conditional_flow_map:
+                conditional_velocities = rearrange(
+                    x1 - x0,
+                    'particle_count dim -> particle_count 1 dim',
+                )
+            else:
+                conditional_velocities = (
+                    rearrange(x1, 'particle_count dim -> particle_count 1 dim')
+                    - (1 - self.cfg.diffusion_path.sigma_min) * rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
+                ) / std
         elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
             raise NotImplementedError()
             time = time * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
@@ -522,7 +532,7 @@ class FlowMatchingMarginal(nn.Module):
         conditional_distribution = torch.distributions.Independent(
             torch.distributions.Normal(
                 loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
-                scale=std#.clamp(min=1e-6)
+                scale=std
             ),
             1,
         )
@@ -533,16 +543,6 @@ class FlowMatchingMarginal(nn.Module):
             'particle_count predicted_state_count -> particle_count predicted_state_count 1',
         )
         weights = log_pt_given_x1.softmax(0) * xt.shape[0]
-        if self.cfg.use_velocity_of_conditional_flow_map:
-            conditional_velocities = rearrange(
-                x1 - x0,
-                'particle_count dim -> particle_count 1 dim',
-            )
-        else:
-            conditional_velocities = (
-                rearrange(x1, 'particle_count dim -> particle_count 1 dim')
-                - rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
-            ) / std#.clamp(min=1e-6)
         return reduce(
             weights * conditional_velocities,
             'particle_count predicted_state_count dim -> predicted_state_count dim',

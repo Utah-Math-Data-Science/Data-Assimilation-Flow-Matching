@@ -7,7 +7,7 @@ class DiffusionPath(orm.InheritableTable):
 
 
 class ConditionalOptimalTransport(DiffusionPath):
-    pass
+    sigma_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
 
 
 class VarianceExploding(DiffusionPath):
