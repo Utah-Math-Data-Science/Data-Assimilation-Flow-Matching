@@ -1,7 +1,8 @@
 import copy
 
 
-def save_all_subfigures(plot, plot_name, format='pdf'):
+def save_all_subfigures(plot, plot_name, format='pdf', renaming=None):
+    renaming = renaming or {}
     p = copy.deepcopy(plot)
     p.figure.savefig(
         f'{plot_name}.legend.{format}', format=format,
@@ -19,9 +20,9 @@ def save_all_subfigures(plot, plot_name, format='pdf'):
                 ax_other.remove()
         variable_names = []
         if len(p.row_names) > 0:
-            variable_names.append(p.row_names[row])
+            variable_names.append(renaming.get(p.row_names[row], p.row_names[row]))
         if len(p.col_names) > 0:
-            variable_names.append(p.col_names[col])
+            variable_names.append(renaming.get(p.col_names[col], p.col_names[col]))
         if len(variable_names) > 0:
             save_name = f'{plot_name}.{"__".join(variable_names)}.{format}'
         else:
