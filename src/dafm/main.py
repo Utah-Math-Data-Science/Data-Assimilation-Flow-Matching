@@ -72,24 +72,6 @@ def main(cfg):
         log.info('Command: python %s', ' '.join(sys.argv))
         log.info('Output directory: %s', cfg.run_dir)
 
-    logger = loggers.CSVLogger(cfg.run_dir, name=None)
-
-    trainer = pl.Trainer(
-        # detect_anomaly=True,
-        accelerator=cfg.device,
-        devices=1,
-        logger=logger,
-        max_epochs=None,
-        check_val_every_n_epoch=None,
-        reload_dataloaders_every_n_epochs=1,
-        deterministic=True,
-        callbacks=[
-            callbacks.TimeStepProgressBar(cfg),
-            callbacks.LogStats(),
-            callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
-        ],
-    )
-
     pl.seed_everything(cfg.rng_seed)
     with pl.utilities.seed.isolate_rng():
         dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device)
@@ -97,6 +79,29 @@ def main(cfg):
         model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_std)
     dataset = datasets.PredictedStatesAndObservation(dynamics, model)
     data_assimilation = DataAssimilation(cfg, dataset, model)
+
+    logger = loggers.CSVLogger(cfg.run_dir, name=None)
+
+    cbs = [
+        callbacks.LogStats(),
+        callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
+    ]
+    enable_progress_bar = False
+    if model.get_optimizer(0, True) is not None:
+        enable_progress_bar = True
+        cbs.append(callbacks.TimeStepProgressBar(cfg))
+    trainer = pl.Trainer(
+        # detect_anomaly=True,
+        enable_progress_bar=enable_progress_bar,
+        accelerator=cfg.device,
+        devices=1,
+        logger=logger,
+        max_epochs=None,
+        check_val_every_n_epoch=None,
+        reload_dataloaders_every_n_epochs=1,
+        deterministic=True,
+        callbacks=cbs,
+    )
 
     trainer.fit(data_assimilation)
 
