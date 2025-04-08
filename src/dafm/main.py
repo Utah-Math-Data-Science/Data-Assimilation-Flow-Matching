@@ -76,6 +76,8 @@ def main(cfg):
 
     trainer = pl.Trainer(
         # detect_anomaly=True,
+        accelerator=cfg.device,
+        devices=1,
         logger=logger,
         max_epochs=None,
         check_val_every_n_epoch=None,
