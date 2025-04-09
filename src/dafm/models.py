@@ -186,6 +186,66 @@ class FlowMatching(Model):
             lr = self.cfg.learning_rate
         return torch.optim.Adam(self.parameters(), lr=lr)
 
+    @staticmethod
+    def diffusion_path_context(cfg, diffusion_path, time_shape, noise, state):
+        path_time = diffusion_path.sample_time(time_shape, device=state.device)
+
+        mean = diffusion_path.mean(path_time, state)
+        std = diffusion_path.std(path_time, state)
+        dt_std = diffusion_path.dt_std(path_time, state)
+        noise_flowed_to_t = mean + noise * std
+        if isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            flow_matching_time = path_time
+            target_velocity = state - noise
+        elif isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            flow_matching_time = 1 - path_time
+            dt_std = -dt_std  # change of variables
+            target_velocity = dt_std * noise
+        else:
+            raise ValueError(f'Unknown diffusion path: {cfg.diffusion_path}')
+
+        diffusion_path_weighting = 1 / dt_std.square()
+
+        return dict(
+            flow_matching_time=flow_matching_time,
+            noise_flowed_to_t=noise_flowed_to_t,
+            target_velocity=target_velocity,
+            mean=mean, std=std, dt_std=dt_std,
+            diffusion_path_weighting=diffusion_path_weighting,
+        )
+
+    @staticmethod
+    def divergence_matching_loss(cfg, forward, flow_matching_time, noise_flowed_to_t, target_velocity, mean, std, dt_std):
+        predicted_state_count, dim = noise_flowed_to_t.shape
+        dx_target_velocity = dt_std / std
+        hutchinson_noise = torch.randn((predicted_state_count, dim), device=noise_flowed_to_t.device)
+        predicted_velocity, predicted_velocity_jvp = torch.autograd.functional.jvp(
+            lambda xt: forward(flow_matching_time, xt),
+            noise_flowed_to_t,
+            hutchinson_noise,
+            create_graph=True,
+        )
+        predicted_divergence = utils.inner_product(hutchinson_noise, predicted_velocity_jvp)
+        dx_log_pt = -(noise_flowed_to_t - mean) / std.square()
+        if cfg.divergence_matching_use_hutchinson_trace_for_target_divergence:
+            target_divergence = (
+                utils.inner_product(hutchinson_noise * dx_target_velocity, hutchinson_noise)
+                + utils.inner_product(hutchinson_noise, target_velocity - predicted_velocity) * utils.inner_product(dx_log_pt, hutchinson_noise)
+            )
+        else:
+            target_divergence = (
+                dx_target_velocity.reshape(cfg.loss_expectation_sample_count, -1).sum(-1, keepdim=True)
+                + utils.inner_product(target_velocity, dx_log_pt)
+                - utils.inner_product(predicted_velocity, dx_log_pt)
+            )
+
+        divergence_matching_weighting = 1 / dx_target_velocity.abs() / (predicted_state_count * dim)
+        divergence_matching_loss = cfg.divergence_matching_loss_coefficient * (
+            divergence_matching_weighting * (target_divergence - predicted_divergence).abs()
+        ).mean()
+
+        return predicted_velocity, divergence_matching_loss
+
     def loss(self, state, observation, observe):
         predicted_state_count, dim = state.shape
         if self.cfg.use_expectation_of_sum:
@@ -196,76 +256,36 @@ class FlowMatching(Model):
         noise = torch.randn((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, dim), device=state.device)
         state = rearrange(state, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
-        path_time = self.diffusion_path.sample_time((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, 1), device=state.device)
+        path_context = self.diffusion_path_context(self.cfg, self.diffusion_path, (self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, 1), noise, state)
         if self.cfg.use_expectation_of_sum:
-            path_time = repeat(path_time, 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count)
-
-        mean = self.diffusion_path.mean(path_time, state)
-        std = self.diffusion_path.std(path_time, state)
-        dt_std = self.diffusion_path.dt_std(path_time, state)
-        noise_flowed_to_t = mean + noise * std
-        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            flow_matching_time = path_time
-            target_velocity = state - noise
-        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            flow_matching_time = 1 - path_time
-            dt_std = -dt_std  # change of variables
-            target_velocity = dt_std * noise
-        else:
-            raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
-
-        diffusion_path_weighting = 1 / dt_std.square()
+            path_context['path_time'] = repeat(path_context['path_time'], 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count)
+        path_context = {
+            k: rearrange(x, 'loss_expectation_sample_count predicted_state_count dim -> (loss_expectation_sample_count predicted_state_count) dim')
+            for k, x in path_context.items()
+        }
 
         if self.cfg.use_divergence_matching:
-            dx_target_velocity = dt_std / std
-            hutchinson_noise = torch.randn((self.cfg.loss_expectation_sample_count * predicted_state_count, dim), device=state.device)
-            predicted_velocity, predicted_velocity_jvp = torch.autograd.functional.jvp(
-                lambda xt: self(
-                    rearrange(flow_matching_time, 'loss_expectation_sample_count predicted_state_count 1 -> (loss_expectation_sample_count predicted_state_count) 1'),
-                    xt
-                ),
-                rearrange(noise_flowed_to_t, 'loss_expectation_sample_count predicted_state_count dim -> (loss_expectation_sample_count predicted_state_count) dim'),
-                hutchinson_noise,
-                create_graph=True,
+            predicted_velocity, divergence_matching_loss = self.divergence_matching_loss(
+                self.cfg,
+                self,
+                path_context['flow_matching_time'],
+                path_context['noise_flowed_to_t'],
+                path_context['target_velocity'],
+                path_context['mean'],
+                path_context['std'],
+                path_context['dt_std'],
             )
-            predicted_velocity, predicted_velocity_jvp, hutchinson_noise = map(
-                lambda x: rearrange(
-                    x,
-                    '(loss_expectation_sample_count predicted_state_count) dim -> loss_expectation_sample_count predicted_state_count dim',
-                    loss_expectation_sample_count=self.cfg.loss_expectation_sample_count
-                ),
-                (predicted_velocity, predicted_velocity_jvp, hutchinson_noise)
-            )
-            predicted_divergence = utils.inner_product(hutchinson_noise, predicted_velocity_jvp)
-            dx_log_pt = -(noise_flowed_to_t - mean) / std.square()
-            if self.cfg.divergence_matching_use_hutchinson_trace_for_target_divergence:
-                target_divergence = (
-                    utils.inner_product(hutchinson_noise * dx_target_velocity, hutchinson_noise)
-                    + utils.inner_product(hutchinson_noise, target_velocity - predicted_velocity) * utils.inner_product(dx_log_pt, hutchinson_noise)
-                )
-            else:
-                target_divergence = (
-                    dx_target_velocity.reshape(self.cfg.loss_expectation_sample_count, -1).sum(-1, keepdim=True)
-                    + utils.inner_product(target_velocity, dx_log_pt)
-                    - utils.inner_product(predicted_velocity, dx_log_pt)
-                )
-
-            divergence_matching_weighting = 1 / dx_target_velocity.abs() / (predicted_state_count * dim)
-            divergence_matching_loss = self.cfg.divergence_matching_loss_coefficient * (
-                divergence_matching_weighting * (target_divergence - predicted_divergence).abs()
-            ).mean()
         else:
-            predicted_velocity = rearrange(
-                self(
-                    rearrange(flow_matching_time, 'loss_expectation_sample_count predicted_state_count 1 -> (loss_expectation_sample_count predicted_state_count) 1'),
-                    rearrange(noise_flowed_to_t, 'loss_expectation_sample_count predicted_state_count dim -> (loss_expectation_sample_count predicted_state_count) dim')
-                ),
-                '(loss_expectation_sample_count predicted_state_count) dim -> loss_expectation_sample_count predicted_state_count dim',
-                loss_expectation_sample_count=self.cfg.loss_expectation_sample_count
-            )
+            predicted_velocity = self(path_context['flow_matching_time'], path_context['noise_flowed_to_t'])
             divergence_matching_loss = 0.
 
-        if observation is None or self.cfg.ignore_observations:
+        predicted_velocity = rearrange(
+            predicted_velocity,
+            '(loss_expectation_sample_count predicted_state_count) dim -> loss_expectation_sample_count predicted_state_count dim',
+            loss_expectation_sample_count=self.cfg.loss_expectation_sample_count,
+        )
+
+        if isinstance(self.cfg.guidance, flow_matching_guidance.No) or observation is None or self.cfg.ignore_observations:
             weighting = 1 / predicted_state_count
         else:
             observation_likelihood_distribution = torch.distributions.Independent(
@@ -279,7 +299,7 @@ class FlowMatching(Model):
             weighting = log_observation_likelihood.softmax(1)
 
         flow_loss = reduce(
-            weighting * diffusion_path_weighting * (predicted_velocity - target_velocity).square(),
+            weighting * path_context['diffusion_path_weighting'] * (predicted_velocity - path_context['target_velocity']).square(),
             'loss_expectation_sample_count predicted_state_count dim -> loss_expectation_sample_count', 'sum'
         ).mean()
 
@@ -407,8 +427,31 @@ class FlowMatchingMarginal(nn.Module):
             'mean'
         )
 
-    def loss(self, diffusion_time, noise, predicted_state, observation, observe):
-        return dict(loss=torch.tensor(0.))
+    def loss(self, flow_matching_time, noise, predicted_state, observation, observe):
+        path_context = FlowMatching.diffusion_path_context(self.cfg, self.diffusion_path, predicted_state.shape, noise, predicted_state)
+        if self.cfg.use_divergence_matching:
+            predicted_velocity, divergence_matching_loss = FlowMatching.divergence_matching_loss(
+                self.cfg, lambda flow_matching_time, noise_flowed_to_t: self(flow_matching_time, noise_flowed_to_t, noise, predicted_state),
+                path_context['flow_matching_time'],
+                path_context['noise_flowed_to_t'],
+                path_context['target_velocity'],
+                path_context['mean'],
+                path_context['std'],
+                path_context['dt_std'],
+            )
+        else:
+            predicted_velocity = self(flow_matching_time, path_context['noise_flowed_to_t'], noise, predicted_state)
+
+        flow_loss = reduce(
+            path_context['diffusion_path_weighting'] * (predicted_velocity - path_context['target_velocity']).square(),
+            'predicted_state_count dim -> predicted_state_count', 'sum'
+        ).mean()
+
+        return dict(
+            loss=flow_loss + divergence_matching_loss,
+            flow_loss=flow_loss,
+            divergence_matching_loss=divergence_matching_loss,
+        )
 
     @torch.no_grad
     def sample(self, current_states, observation, observe, time_step_count=None):

@@ -69,7 +69,7 @@ class ConditionalOptimalTransport(GaussianPath):
         return 1 - (1 - self.cfg.sigma_min) * t
 
     def dt_std(self, t, x1):
-        return torch.tensor(-1 + self.cfg.sigma_min, device=t.device)
+        return torch.full_like(t, -1 + self.cfg.sigma_min)
 
 
 class VarianceExploding(GaussianPath):
@@ -135,13 +135,16 @@ class VarianceExploding(GaussianPath):
         )**(1/2)
 
     def dt_std(self, t, x0):
-        return self.cfg.sigma_min * (
-            self.cfg.sigma_max / self.cfg.sigma_min
-        )**(2 * t) / (
-            ((self.cfg.sigma_max / self.cfg.sigma_min)**(2 * t) - 1)
-            * 2
-            / np.log(self.cfg.sigma_max / self.cfg.sigma_min)
-        )**(1/2)
+        return torch.full_like(
+            t,
+            self.cfg.sigma_min * (
+                self.cfg.sigma_max / self.cfg.sigma_min
+            )**(2 * t) / (
+                ((self.cfg.sigma_max / self.cfg.sigma_min)**(2 * t) - 1)
+                * 2
+                / np.log(self.cfg.sigma_max / self.cfg.sigma_min)
+            )**(1/2)
+        )
 
     def g(self, t):
         # this is sqrt(d/dt (self.sigma(t))^2)
