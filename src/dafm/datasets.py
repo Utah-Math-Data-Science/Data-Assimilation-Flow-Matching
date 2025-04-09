@@ -103,7 +103,7 @@ class DoubleWell(Dataset):
         return true_state
 
     def dynamics(self, t, x):
-        return -4 * x * (x**2 - 1)
+        return -4 * x * (x.square() - 1)
 
 
 class Lorenz63(Dataset):

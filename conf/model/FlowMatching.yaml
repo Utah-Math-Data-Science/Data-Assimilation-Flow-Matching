@@ -5,4 +5,3 @@ defaults:
   - _self_
 
 batch_size: ${oc.select:..dataset.predicted_state_count,1}
-loss_expectation_sample_count: ${.batch_size}
