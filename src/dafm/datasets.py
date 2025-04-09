@@ -158,9 +158,11 @@ class PredictedStatesAndObservation(IterableDataset):
             self.time_step = time_step
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
             if not ignore_observation or self.model.cfg.train_when_ignoring_observation:
-                yield time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
+                yield 'predict', time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
             if not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation:
-                sampled_state = self.model.sample(next_predicted_state, next_observation, self.dataset.observe)
+                for done, sample_time_step, sample_t_now_and_next, sampled_state in self.model.sampling_steps(next_predicted_state, next_observation, self.dataset.observe):
+                    if not done and self.model.cfg.train_on_sampling_intermediate_states:
+                        yield 'sample', sample_time_step, sample_t_now_and_next, sampled_state, next_observation, ignore_observation
             else:
                 sampled_state = next_predicted_state
             self.dataset.data['predicted_state'].append(sampled_state)

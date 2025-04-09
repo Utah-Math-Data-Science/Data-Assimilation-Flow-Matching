@@ -36,7 +36,11 @@ class DataAssimilation(pl.LightningModule):
             self.dataset_iterable = iter(self.dataset)
 
     def train_dataloader(self):
-        time_step, time, next_predicted_state, next_observation, ignore_observation = next(self.dataset_iterable)
+        mode, time_step, time, next_predicted_state, next_observation, ignore_observation = next(self.dataset_iterable)
+        if mode == 'predict':
+            epoch_count = self.cfg.model.epoch_count
+        elif mode == 'sample':
+            epoch_count = self.cfg.model.epoch_count_sampling
         self.optimizer = self.model.get_optimizer(time_step, ignore_observation)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
@@ -46,7 +50,7 @@ class DataAssimilation(pl.LightningModule):
                     next_observation=DataLoader([next_observation]),
                     ignore_observation=DataLoader([ignore_observation]),
             ), mode='max_size_cycle'))
-            for epoch in range(self.cfg.model.epoch_count)
+            for epoch in range(epoch_count)
         }, mode='sequential')
 
     def training_step(self, batch, _):
