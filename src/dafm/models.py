@@ -432,6 +432,7 @@ class FlowMatchingMarginal(nn.Module):
             )
         else:
             predicted_velocity = self(time, xt)
+            divergence_matching_loss = 0.
 
         diffusion_path_weighting = 1 / dt_std.square()
 
@@ -477,10 +478,12 @@ class FlowMatchingMarginal(nn.Module):
                 ),
                 'particle_count predicted_state_count -> particle_count predicted_state_count 1',
             )
-            self.weights = log_pt_given_x1.softmax(0) * predicted_state_count
+            weights = log_pt_given_x1.softmax(0) * predicted_state_count
             if self.cfg.epoch_count_sampling > 0:
                 self.loss = partial(self._loss, mean, dt_mean, std, dt_std, time)
-                self.weights = nn.Parameter(self.weights)
+                self.weights = nn.Parameter(weights)
+            else:
+                self.weights = weights
             self.forward = partial(self._forward, mean, dt_mean, std, dt_std)
             yield done, time_step, time, xt
 

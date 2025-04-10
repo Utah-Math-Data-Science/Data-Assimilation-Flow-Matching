@@ -85,7 +85,7 @@ def main(cfg):
         callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
     ]
     enable_progress_bar = False
-    if cfg.model.epoch_count > 0 or cfg.model.epoch_count_sampling > 0:
+    if cfg.model.epoch_count > 0:# or cfg.model.epoch_count_sampling > 0:
         enable_progress_bar = True
         cbs.append(callbacks.TimeStepProgressBar(cfg))
     trainer = pl.Trainer(
