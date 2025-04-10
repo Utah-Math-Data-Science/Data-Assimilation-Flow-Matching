@@ -94,7 +94,7 @@ def main(cfg):
         accelerator=cfg.device,
         devices=1,
         logger=logger,
-        max_epochs=None,
+        max_epochs=-1,
         check_val_every_n_epoch=None,
         reload_dataloaders_every_n_epochs=1,
         deterministic=True,

@@ -5,7 +5,7 @@ defaults:
   - override guidance/schedule: Constant
   - _self_
 
-epoch_count: 1
+epoch_count: 0
 train_on_initial_predicted_state: false
 diffusion_path:
   sigma_min: 1.6e-6

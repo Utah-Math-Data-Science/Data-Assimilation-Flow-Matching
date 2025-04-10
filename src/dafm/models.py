@@ -341,11 +341,11 @@ class FlowMatching(Model):
         time_step_size = path_time[1] - path_time[0]
         time_step_size_sqrt = time_step_size.sqrt()
         for time_step, t_now_and_next in enumerate(path_time.unfold(0, 2, 1)):
-            done = False
-            yield done, time_step, t_now_and_next, noise, xt
-
+            t_now, t_next = t_now_and_next
             if cfg.sampler is conf.models.Sampler.EULER:
-                xt = xt + time_step_size * velocity(t_now_and_next[0], xt)
+                done = False
+                yield done, time_step, t_now, noise, xt
+                xt = xt + time_step_size * velocity(t_now, xt)
                 state_out = xt
             elif cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
                 if not isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
@@ -354,19 +354,25 @@ class FlowMatching(Model):
                         ' Please use a different sampler (e.g., set model.sampler=EULER), or use a diffusion diffusion path (e.g., set model/diffusion_path=ConditionalOptimalTransport).'
                     )
                 g = diffusion_path.g(1 - t_now_and_next[0])
-                state_drift = xt + time_step_size * velocity(t_now_and_next[0], xt)
+                done = False
+                yield done, time_step, t_now, noise, xt
+                state_drift = xt + time_step_size * velocity(t_now, xt)
                 xt = state_drift + g * torch.randn_like(xt) * time_step_size_sqrt
                 state_out = state_drift
             elif cfg.sampler is conf.models.Sampler.HEUN:
-                xdot_now = velocity(t_now_and_next[0], xt)
+                done = False
+                yield done, time_step, t_now, noise, xt
+                xdot_now = velocity(t_now, xt)
                 temp = xt + time_step_size * xdot_now
-                xt = xt + time_step_size * (xdot_now + velocity(t_now_and_next[1], temp)) / 2
+                done = False
+                yield done, time_step, t_next, noise, temp
+                xt = xt + time_step_size * (xdot_now + velocity(t_next, temp)) / 2
                 state_out = xt
             else:
                 raise ValueError(f'Unsupported sampler for {FlowMatching.__class__.__name__}: {cfg.sampler}')
 
         done = True
-        yield done, time_step, t_now_and_next, noise, state_out
+        yield done, time_step, t_next, noise, state_out
 
     @torch.no_grad
     def sampling_steps(self, current_states, observation, observe, time_step_count=None):
@@ -395,22 +401,24 @@ class FlowMatchingMarginal(nn.Module):
             lr = self.cfg.learning_rate
         return torch.optim.Adam(self.parameters(), lr=lr)
 
-    def conditional_velocity(self, mean, std, dt_std, time, x):
-        return dt_std / std * (x - mean)
+    def conditional_velocity(self, mean, dt_mean, std, dt_std, time, x):
+        return dt_std / std * (x - mean) + dt_mean
 
-    def _forward(self, mean, std, dt_std, time, x):
+    def _forward(self, mean, dt_mean, std, dt_std, time, x):
         return reduce(
             self.weights * self.conditional_velocity(
-                mean, std, dt_std, time,
-                rearrange(x, 'predicted_state_count dim -> 1 predicted_state_count dim')
-                - rearrange(mean, 'particle_count dim -> particle_count 1 dim')
+                rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
+                rearrange(dt_mean, 'particle_count dim -> particle_count 1 dim'),
+                std, dt_std,
+                time,
+                rearrange(x, 'predicted_state_count dim -> 1 predicted_state_count dim'),
             ),
             'particle_count predicted_state_count dim -> predicted_state_count dim',
             'mean'
         )
 
-    def _loss(self, mean, std, dt_std, time, xt, observation, observe):
-        target_velocity = self.conditional_velocity(mean, std, dt_std, time, xt)
+    def _loss(self, mean, dt_mean, std, dt_std, time, xt, observation, observe):
+        target_velocity = self.conditional_velocity(mean, dt_mean, std, dt_std, time, xt)
         if self.cfg.use_divergence_matching:
             predicted_velocity, divergence_matching_loss = FlowMatching.divergence_matching_loss(
                 self.cfg,
@@ -441,7 +449,7 @@ class FlowMatchingMarginal(nn.Module):
     @torch.no_grad
     def sampling_steps(self, data, observation, observe, time_step_count=None):
         predicted_state_count = data.shape[0]
-        for done, time_step, t_now_and_next, noise, xt in FlowMatching._sampling_steps(
+        for done, time_step, time, noise, xt in FlowMatching._sampling_steps(
             self.cfg,
             self.diffusion_path,
             self,
@@ -449,10 +457,13 @@ class FlowMatchingMarginal(nn.Module):
             data, observation, observe,
             time_step_count=time_step_count
         ):
-            t_now = t_now_and_next[0]
-            mean = self.diffusion_path.mean(t_now, data)
-            std = self.diffusion_path.std(t_now, data)
-            dt_std = self.diffusion_path.dt_std(t_now, data)
+            if done:
+                yield done, time_step, time, xt
+                break
+            mean = self.diffusion_path.mean(time, data)
+            dt_mean = self.diffusion_path.dt_mean(time, data)
+            std = self.diffusion_path.std(time, data)
+            dt_std = self.diffusion_path.dt_std(time, data)
             conditional_distribution = torch.distributions.Independent(
                 torch.distributions.Normal(
                     loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
@@ -466,13 +477,12 @@ class FlowMatchingMarginal(nn.Module):
                 ),
                 'particle_count predicted_state_count -> particle_count predicted_state_count 1',
             )
+            self.weights = log_pt_given_x1.softmax(0) * predicted_state_count
             if self.cfg.epoch_count_sampling > 0:
-                self.loss = partial(self._loss, mean, std, dt_std, t_now)
+                self.loss = partial(self._loss, mean, dt_mean, std, dt_std, time)
                 self.weights = nn.Parameter(self.weights)
-            else:
-                self.weights = log_pt_given_x1.softmax(0) * predicted_state_count
-            self.forward = partial(self._forward, mean, std, dt_std)
-            yield done, time_step, t_now_and_next, xt
+            self.forward = partial(self._forward, mean, dt_mean, std, dt_std)
+            yield done, time_step, time, xt
 
 
 def get_model(cfg, state_dimension, observation_std):
