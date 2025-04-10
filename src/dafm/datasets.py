@@ -145,9 +145,11 @@ class PredictedStatesAndObservation(IterableDataset):
         if self.model.cfg.train_on_initial_predicted_state:
             time_step, t_now_and_next, predicted_state, next_observation, _ = next(iter(self.dataset))
             self.time_step = time_step
-            yield time_step, t_now_and_next, predicted_state, next_observation, True
+            yield self.model.cfg.epoch_count, time_step, t_now_and_next, predicted_state, next_observation, True
             if self.model.cfg.resample_initial_predicted_state:
-                sampled_state = self.model.sample(predicted_state, None, self.dataset.observe)
+                for done, sample_time_step, sample_t_now_and_next, sampled_state in self.model.sampling_steps(predicted_state, next_observation, self.dataset.observe):
+                    if self.model.cfg.epoch_count_sampling > 0 and not done:
+                        yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_t_now_and_next, sampled_state, next_observation, True
                 self.dataset.data['predicted_state'][0] = sampled_state
         for time_step, t_now_and_next, predicted_state, next_observation, ignore_observation in tqdm(
            self.dataset,
@@ -157,12 +159,12 @@ class PredictedStatesAndObservation(IterableDataset):
         ):
             self.time_step = time_step
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
-            if not ignore_observation or self.model.cfg.train_when_ignoring_observation:
-                yield 'predict', time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
+            if self.model.cfg.epoch_count > 0 and (not ignore_observation or self.model.cfg.train_when_ignoring_observation):
+                yield self.model.cfg.epoch_count, time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
             if not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation:
                 for done, sample_time_step, sample_t_now_and_next, sampled_state in self.model.sampling_steps(next_predicted_state, next_observation, self.dataset.observe):
-                    if not done and self.model.cfg.train_on_sampling_intermediate_states:
-                        yield 'sample', sample_time_step, sample_t_now_and_next, sampled_state, next_observation, ignore_observation
+                    if self.model.cfg.epoch_count_sampling > 0 and not done:
+                        yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_t_now_and_next, sampled_state, next_observation, ignore_observation
             else:
                 sampled_state = next_predicted_state
             self.dataset.data['predicted_state'].append(sampled_state)

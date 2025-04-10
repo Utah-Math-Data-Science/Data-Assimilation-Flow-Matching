@@ -1,3 +1,4 @@
+from functools import partial
 import logging
 
 import numpy as np
@@ -94,7 +95,7 @@ class Model(nn.Module):
 
 class ScoreMatching(Model):
     def forward(self, time, state):
-        return super().forward(time, state) / self.sigma(time)
+        return super().forward(time, state) / self.diffusion_path.std(time, None)
 
     def get_optimizer(self, time_step, ignore_observation):
         if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
@@ -106,9 +107,9 @@ class ScoreMatching(Model):
     def loss(self, state, observation, observe):
         diffusion_time = self.diffusion_path.sample_time((state.shape[0], 1), device=state.device)
         noise = torch.randn_like(state)
-        std = self.std(diffusion_time, state)
-        noised_state = state + noise * std
-        predicted_score = self(diffusion_time, noised_state)
+        std = self.diffusion_path.std(diffusion_time, state)
+        noise_flowed_to_t = state + noise * std
+        predicted_score = self(diffusion_time, noise_flowed_to_t)
         return dict(
             loss=reduce(
                 (predicted_score * std + noise).square(),
@@ -120,31 +121,33 @@ class ScoreMatching(Model):
         return (1 - 2 * t).clamp(min=0)
 
     @torch.no_grad
-    def sample(self, current_states, observation, observe, time_step_count=None):
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or self.cfg.sampling_time_step_count
-        diffusion_time = self.diffusion_path.linspace_time(time_step_count, device=current_states.device)
+        diffusion_time = self.diffusion_path.linspace_time(time_step_count, device=data.device)
         minus_time_step_size = diffusion_time[1] - diffusion_time[0]
         minus_time_step_size_abs_sqrt = minus_time_step_size.abs().sqrt()
-        xt = torch.randn_like(current_states) * self.std(1)
-        for t in diffusion_time[:-1]:
-            score = self(t, xt)
+        noise = torch.randn_like(data) * self.diffusion_path.std(1, data)
+        xt = noise
+        for time_step, t_now_and_next in enumerate(diffusion_time.unfold(0, 2, 1)):
+            done = False
+            yield done, time_step, t_now_and_next, xt
+            t_now = t_now_and_next[0]
+            score = self(t_now, xt)
             if observation is None or self.cfg.ignore_observations:
                 observation_score = 0.
             else:
                 with torch.enable_grad():
                     xt_grad = xt.detach().requires_grad_()
-                    log_observation_likelihood = -.5 * reduce(
-                        (observe(xt_grad) - observation).square(),
-                        'predicted_state_count dim ->',
-                        'sum'
+                    observation_likelihood_distribution = torch.distributions.Independent(
+                        torch.distributions.Normal(observation, self.observation_std),
+                        1,
                     )
+                    log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(xt_grad))
                     observation_score, *_ = torch.autograd.grad(
-                        outputs=log_observation_likelihood,
+                        outputs=log_observation_likelihood.sum(),
                         inputs=xt_grad,
                     )
-                # this seems backwards; should it be (observation - state)? because we are given state?
-                # observation_score = -(observe(state) - observation) / self.observation_std.square()
-            score = score + observation_score * self.observation_likelihood_score_damping(t)
+            score = score + observation_score * self.observation_likelihood_score_damping(t_now)
 
             # why use mean? like RMSE?
             score_norm = reduce(score.square(), 'batch dim -> batch', 'mean').sqrt()
@@ -154,7 +157,7 @@ class ScoreMatching(Model):
                 'batch -> batch 1'
             )
 
-            g = self.diffusion_path.g(t)
+            g = self.diffusion_path.g(t_now)
             if self.cfg.sampler is conf.models.Sampler.EULER:
                 xt = xt - g.square() * score * minus_time_step_size
                 state_out = xt
@@ -168,7 +171,8 @@ class ScoreMatching(Model):
         # no noise in final step
         # maybe this is done to handle the discontinuity of the variance exploding path as t -> 0.
         # just use the mean of the noise distribution for the last step
-        return state_out
+        done = True
+        yield done, time_step, t_now_and_next, state_out
 
 
 class FlowMatching(Model):
@@ -187,19 +191,14 @@ class FlowMatching(Model):
         return torch.optim.Adam(self.parameters(), lr=lr)
 
     @staticmethod
-    def diffusion_path_context(cfg, diffusion_path, time_shape, noise, state):
-        path_time = diffusion_path.sample_time(time_shape, device=state.device)
-
-        mean = diffusion_path.mean(path_time, state)
-        std = diffusion_path.std(path_time, state)
-        dt_std = diffusion_path.dt_std(path_time, state)
+    def diffusion_path_context(cfg, diffusion_path, path_time, noise, data):
+        mean = diffusion_path.mean(path_time, data)
+        std = diffusion_path.std(path_time, data)
+        dt_std = diffusion_path.dt_std(path_time, data)
         noise_flowed_to_t = mean + noise * std
         if isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            flow_matching_time = path_time
-            target_velocity = state - noise
+            target_velocity = data - noise
         elif isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            flow_matching_time = 1 - path_time
-            dt_std = -dt_std  # change of variables
             target_velocity = dt_std * noise
         else:
             raise ValueError(f'Unknown diffusion path: {cfg.diffusion_path}')
@@ -207,7 +206,7 @@ class FlowMatching(Model):
         diffusion_path_weighting = 1 / dt_std.square()
 
         return dict(
-            flow_matching_time=flow_matching_time,
+            path_time=path_time,
             noise_flowed_to_t=noise_flowed_to_t,
             target_velocity=target_velocity,
             mean=mean, std=std, dt_std=dt_std,
@@ -215,12 +214,12 @@ class FlowMatching(Model):
         )
 
     @staticmethod
-    def divergence_matching_loss(cfg, forward, flow_matching_time, noise_flowed_to_t, target_velocity, mean, std, dt_std):
+    def divergence_matching_loss(cfg, mean, std, dt_std, path_time, forward, noise_flowed_to_t, target_velocity):
         predicted_state_count, dim = noise_flowed_to_t.shape
         dx_target_velocity = dt_std / std
         hutchinson_noise = torch.randn((predicted_state_count, dim), device=noise_flowed_to_t.device)
         predicted_velocity, predicted_velocity_jvp = torch.autograd.functional.jvp(
-            lambda xt: forward(flow_matching_time, xt),
+            lambda xt: forward(path_time, xt),
             noise_flowed_to_t,
             hutchinson_noise,
             create_graph=True,
@@ -256,9 +255,11 @@ class FlowMatching(Model):
         noise = torch.randn((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, dim), device=state.device)
         state = rearrange(state, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
-        path_context = self.diffusion_path_context(self.cfg, self.diffusion_path, (self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, 1), noise, state)
+        path_time = self.diffusion_path.sample_time((self.cfg.loss_expectation_sample_count, time_noise_samples_per_expectation_sample, 1), device=state.device)
+        path_context = self.diffusion_path_context(self.cfg, self.diffusion_path, path_time, noise, state)
         if self.cfg.use_expectation_of_sum:
-            path_context['path_time'] = repeat(path_context['path_time'], 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count)
+            path_time = repeat(path_time, 'loss_expectation_sample_count 1 1 -> loss_expectation_sample_count predicted_state_count 1', predicted_state_count=predicted_state_count)
+        path_context['path_time'] = path_time
         path_context = {
             k: rearrange(x, 'loss_expectation_sample_count predicted_state_count dim -> (loss_expectation_sample_count predicted_state_count) dim')
             for k, x in path_context.items()
@@ -267,16 +268,16 @@ class FlowMatching(Model):
         if self.cfg.use_divergence_matching:
             predicted_velocity, divergence_matching_loss = self.divergence_matching_loss(
                 self.cfg,
-                self,
-                path_context['flow_matching_time'],
-                path_context['noise_flowed_to_t'],
-                path_context['target_velocity'],
                 path_context['mean'],
                 path_context['std'],
                 path_context['dt_std'],
+                path_context['path_time'],
+                self,
+                path_context['noise_flowed_to_t'],
+                path_context['target_velocity'],
             )
         else:
-            predicted_velocity = self(path_context['flow_matching_time'], path_context['noise_flowed_to_t'])
+            predicted_velocity = self(path_context['path_time'], path_context['noise_flowed_to_t'])
             divergence_matching_loss = 0.
 
         predicted_velocity = rearrange(
@@ -312,27 +313,23 @@ class FlowMatching(Model):
     def observation_likelihood_score_damping(self, t):
         return (1 - 2 * t).clamp(min=0)
 
-    @torch.no_grad
-    def sampling_steps(self, current_states, observation, observe, time_step_count=None):
-        time_step_count = time_step_count or self.cfg.sampling_time_step_count
-        path_time = self.diffusion_path.linspace_time(time_step_count, device=current_states.device)
-        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            flow_matching_time = path_time
-            xt = torch.randn_like(current_states)
-        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            flow_matching_time = 1 - path_time
-            xt = torch.randn_like(current_states) * self.diffusion_path.std(1)
+    @staticmethod
+    def _sampling_steps(cfg, diffusion_path, forward, guidance, data, observation, observe, time_step_count=None):
+        time_step_count = time_step_count or cfg.sampling_time_step_count
+        path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
+        if isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+            noise = torch.randn_like(data)
+        elif isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            noise = torch.randn_like(data) * diffusion_path.std(1, data)
         else:
-            raise ValueError(f'Unknown diffusion path: {self.cfg.diffusion_path}')
-
-        if isinstance(self.cfg.guidance, flow_matching_guidance.No) or observation is None or self.cfg.ignore_observations:
-            velocity = self
+            raise ValueError(f'Unknown diffusion path: {cfg.diffusion_path}')
+        if isinstance(cfg.guidance, flow_matching_guidance.No) or observation is None or cfg.ignore_observations:
+            velocity = forward
         else:
-            noise = xt
             def velocity(t, x):
-                dot_state_unguided = self(t, x)
-                return dot_state_unguided + self.guidance(
-                    t, x, noise, current_states, dot_state_unguided,
+                dot_state_unguided = forward(t, x)
+                return dot_state_unguided + guidance(
+                    t, x, noise, data, dot_state_unguided,
                     energy_function=lambda x1_predicted: reduce(
                         (observe(x1_predicted) - observation).square(),
                         'predicted_state_count dim -> predicted_state_count 1',
@@ -340,35 +337,48 @@ class FlowMatching(Model):
                     )
                 )
 
-        time_step_size = flow_matching_time[1] - flow_matching_time[0]
+        xt = noise
+        time_step_size = path_time[1] - path_time[0]
         time_step_size_sqrt = time_step_size.sqrt()
-        for time_step, (t_now, t_next) in enumerate(zip(flow_matching_time, flow_matching_time[1:])):
+        for time_step, t_now_and_next in enumerate(path_time.unfold(0, 2, 1)):
             done = False
-            yield done, time_step, noise, xt
+            yield done, time_step, t_now_and_next, noise, xt
 
-            if self.cfg.sampler is conf.models.Sampler.EULER:
-                xt = xt + time_step_size * velocity(t_now, xt)
+            if cfg.sampler is conf.models.Sampler.EULER:
+                xt = xt + time_step_size * velocity(t_now_and_next[0], xt)
                 state_out = xt
-            elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
-                if not isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
+            elif cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+                if not isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
                     raise ValueError(
-                        f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {self.cfg.diffusion_path.__class__.__name__}.'
+                        f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {cfg.diffusion_path.__class__.__name__}.'
                         ' Please use a different sampler (e.g., set model.sampler=EULER), or use a diffusion diffusion path (e.g., set model/diffusion_path=ConditionalOptimalTransport).'
                     )
-                g = self.diffusion_path.g(1 - t_now)
-                state_drift = xt + time_step_size * velocity(t_now, xt)
+                g = diffusion_path.g(1 - t_now_and_next[0])
+                state_drift = xt + time_step_size * velocity(t_now_and_next[0], xt)
                 xt = state_drift + g * torch.randn_like(xt) * time_step_size_sqrt
                 state_out = state_drift
-            elif self.cfg.sampler is conf.models.Sampler.HEUN:
-                xdot_now = velocity(t_now, xt)
+            elif cfg.sampler is conf.models.Sampler.HEUN:
+                xdot_now = velocity(t_now_and_next[0], xt)
                 temp = xt + time_step_size * xdot_now
-                xt = xt + time_step_size * (xdot_now + velocity(t_next, temp)) / 2
+                xt = xt + time_step_size * (xdot_now + velocity(t_now_and_next[1], temp)) / 2
                 state_out = xt
             else:
-                raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
+                raise ValueError(f'Unsupported sampler for {FlowMatching.__class__.__name__}: {cfg.sampler}')
 
         done = True
-        yield done, time_step, noise, state_out
+        yield done, time_step, t_now_and_next, noise, state_out
+
+    @torch.no_grad
+    def sampling_steps(self, current_states, observation, observe, time_step_count=None):
+        for done, time_step, t_now_and_next, noise, xt in FlowMatching._sampling_steps(
+            self.cfg,
+            self.diffusion_path,
+            self,
+            self.guidance,
+            current_states, observation, observe,
+            time_step_count=time_step_count
+        ):
+            yield done, time_step, t_now_and_next, xt
 
 
 class FlowMatchingMarginal(nn.Module):
@@ -379,59 +389,46 @@ class FlowMatchingMarginal(nn.Module):
         self.guidance = guidance
 
     def get_optimizer(self, time_step, ignore_observation):
-        if self.cfg.train_conditional_vector_field_weights:
-            if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
-                lr = self.cfg.learning_rate_when_training_on_initial_predicted_state
-            else:
-                lr = self.cfg.learning_rate
-            return torch.optim.Adam(self.parameters(), lr=lr)
+        if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
+            lr = self.cfg.learning_rate_when_training_on_initial_predicted_state
         else:
-            return None
+            lr = self.cfg.learning_rate
+        return torch.optim.Adam(self.parameters(), lr=lr)
 
-    def forward(self, time, xt, x0, x1, weights):
-        if self.cfg.resample_noise_when_estimating_vector_field:
-            x0 = torch.randn_like(x1)
-        if isinstance(self.cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            mean = x1 * time
-            std = 1 - (1 - self.cfg.diffusion_path.sigma_min) * time
-            if self.cfg.use_velocity_of_conditional_flow_map:
-                conditional_velocities = rearrange(
-                    x1 - x0,
-                    'particle_count dim -> particle_count 1 dim',
-                )
-            else:
-                conditional_velocities = (
-                    rearrange(x1, 'particle_count dim -> particle_count 1 dim')
-                    - (1 - self.cfg.diffusion_path.sigma_min) * rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
-                ) / std
-        elif isinstance(self.cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            raise NotImplementedError()
-            time = time * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+    def conditional_velocity(self, mean, std, dt_std, time, x):
+        return dt_std / std * (x - mean)
 
+    def _forward(self, mean, std, dt_std, time, x):
         return reduce(
-            weights * conditional_velocities,
+            self.weights * self.conditional_velocity(
+                mean, std, dt_std, time,
+                rearrange(x, 'predicted_state_count dim -> 1 predicted_state_count dim')
+                - rearrange(mean, 'particle_count dim -> particle_count 1 dim')
+            ),
             'particle_count predicted_state_count dim -> predicted_state_count dim',
             'mean'
         )
 
-    def loss(self, flow_matching_time, noise, predicted_state, observation, observe):
-        path_context = FlowMatching.diffusion_path_context(self.cfg, self.diffusion_path, predicted_state.shape, noise, predicted_state)
+    def _loss(self, mean, std, dt_std, time, xt, observation, observe):
+        target_velocity = self.conditional_velocity(mean, std, dt_std, time, xt)
         if self.cfg.use_divergence_matching:
             predicted_velocity, divergence_matching_loss = FlowMatching.divergence_matching_loss(
                 self.cfg,
-                lambda flow_matching_time, noise_flowed_to_t: self(flow_matching_time, noise_flowed_to_t, noise, predicted_state),
-                path_context['flow_matching_time'],
-                path_context['noise_flowed_to_t'],
-                path_context['target_velocity'],
-                path_context['mean'],
-                path_context['std'],
-                path_context['dt_std'],
+                mean,
+                std,
+                dt_std,
+                time,
+                lambda t, noise_flowed_to_t: self(t, noise_flowed_to_t),
+                xt,
+                target_velocity,
             )
         else:
-            predicted_velocity = self(flow_matching_time, path_context['noise_flowed_to_t'], noise, predicted_state)
+            predicted_velocity = self(time, xt)
+
+        diffusion_path_weighting = 1 / dt_std.square()
 
         flow_loss = reduce(
-            path_context['diffusion_path_weighting'] * (predicted_velocity - path_context['target_velocity']).square(),
+            diffusion_path_weighting * (predicted_velocity - target_velocity).square(),
             'predicted_state_count dim -> predicted_state_count', 'sum'
         ).mean()
 
@@ -442,37 +439,52 @@ class FlowMatchingMarginal(nn.Module):
         )
 
     @torch.no_grad
-    def sampling_steps(self, current_states, observation, observe, time_step_count=None):
-        for done, time_step, t_now_and_next, xt in FlowMatching.sampling_steps(current_states, observation, observe):
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        predicted_state_count = data.shape[0]
+        for done, time_step, t_now_and_next, noise, xt in FlowMatching._sampling_steps(
+            self.cfg,
+            self.diffusion_path,
+            self,
+            self.guidance,
+            data, observation, observe,
+            time_step_count=time_step_count
+        ):
+            t_now = t_now_and_next[0]
+            mean = self.diffusion_path.mean(t_now, data)
+            std = self.diffusion_path.std(t_now, data)
+            dt_std = self.diffusion_path.dt_std(t_now, data)
             conditional_distribution = torch.distributions.Independent(
                 torch.distributions.Normal(
-                    loc=rearrange(path_context['mean'], 'particle_count dim -> particle_count 1 dim'),
-                    scale=path_context['std']
+                    loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
+                    scale=std,
                 ),
                 1,
             )
             log_pt_given_x1 = rearrange(
                 conditional_distribution.log_prob(
-                    rearrange(path_context['noise_flowed_to_t'], 'predicted_state_count dim -> 1 predicted_state_count dim')
+                    rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
                 ),
                 'particle_count predicted_state_count -> particle_count predicted_state_count 1',
             )
-            self.weights = log_pt_given_x1.softmax(0) * path_context['noise_flowed_to_t']
-            if self.cfg.train_conditional_vector_field_weights:
+            if self.cfg.epoch_count_sampling > 0:
+                self.loss = partial(self._loss, mean, std, dt_std, t_now)
                 self.weights = nn.Parameter(self.weights)
+            else:
+                self.weights = log_pt_given_x1.softmax(0) * predicted_state_count
+            self.forward = partial(self._forward, mean, std, dt_std)
             yield done, time_step, t_now_and_next, xt
 
 
 def get_model(cfg, state_dimension, observation_std):
     if isinstance(cfg, conf.models.ScoreMatching):
-        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path)
+        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
         return ScoreMatching(cfg, state_dimension, observation_std, diffusion_path)
     elif isinstance(cfg, conf.models.FlowMatching):
-        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path)
+        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
         return FlowMatching(cfg, state_dimension, observation_std, diffusion_path, guidance)
     elif isinstance(cfg, conf.models.FlowMatchingMarginal):
-        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path)
+        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
         return FlowMatchingMarginal(cfg, diffusion_path, guidance)
     else:

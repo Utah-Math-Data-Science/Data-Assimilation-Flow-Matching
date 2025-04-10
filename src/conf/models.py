@@ -18,6 +18,7 @@ class Model(orm.InheritableTable):
 
 class Trainable(Model):
     epoch_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
+    epoch_count_sampling: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=0)
     batch_size: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1000)
     shuffle_training_samples: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
@@ -91,7 +92,6 @@ class FlowMatchingMarginal(Trainable):
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
-    train_conditional_vector_field_weights: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     use_velocity_of_conditional_flow_map: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     resample_noise_when_estimating_vector_field: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     use_divergence_matching: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)

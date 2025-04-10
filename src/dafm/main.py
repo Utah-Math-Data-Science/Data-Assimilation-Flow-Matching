@@ -36,11 +36,7 @@ class DataAssimilation(pl.LightningModule):
             self.dataset_iterable = iter(self.dataset)
 
     def train_dataloader(self):
-        mode, time_step, time, next_predicted_state, next_observation, ignore_observation = next(self.dataset_iterable)
-        if mode == 'predict':
-            epoch_count = self.cfg.model.epoch_count
-        elif mode == 'sample':
-            epoch_count = self.cfg.model.epoch_count_sampling
+        epoch_count, time_step, time, next_predicted_state, next_observation, ignore_observation = next(self.dataset_iterable)
         self.optimizer = self.model.get_optimizer(time_step, ignore_observation)
         return CombinedLoader({
             epoch: iter(CombinedLoader(dict(
@@ -55,13 +51,11 @@ class DataAssimilation(pl.LightningModule):
 
     def training_step(self, batch, _):
         batch, batch_idx, epoch = utils.unpack_batch(batch)
-        if self.optimizer is not None:
-            self.optimizer.zero_grad()
+        self.optimizer.zero_grad()
         next_observation = batch['next_observation'] if not batch['ignore_observation'] else None
         losses = self.model.loss(batch['next_predicted_state'], next_observation, self.dataset.dataset.observe)
-        if self.optimizer is not None:
-            self.manual_backward(losses['loss'])
-            self.optimizer.step()
+        self.manual_backward(losses['loss'])
+        self.optimizer.step()
         return losses
 
 
@@ -91,7 +85,7 @@ def main(cfg):
         callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
     ]
     enable_progress_bar = False
-    if model.get_optimizer(0, True) is not None:
+    if cfg.model.epoch_count > 0 or cfg.model.epoch_count_sampling > 0:
         enable_progress_bar = True
         cbs.append(callbacks.TimeStepProgressBar(cfg))
     trainer = pl.Trainer(

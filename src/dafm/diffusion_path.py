@@ -76,7 +76,7 @@ class ConditionalOptimalTransport(GaussianPath):
         return 1 - (1 - self.cfg.sigma_min) * t
 
     def dt_std(self, t, data):
-        return torch.full_like(t, -1 + self.cfg.sigma_min)
+        return t * 0 - 1 + self.cfg.sigma_min
 
 
 class VarianceExploding(GaussianPath):
@@ -161,8 +161,7 @@ class VarianceExploding(GaussianPath):
         if self.target_distribution_at_time_1:
             t = self._reverse_time(t)
             change_of_time_variable = -1
-        return change_of_time_variable * torch.full_like(
-            t,
+        return t * 0 + change_of_time_variable * (
             self.cfg.sigma_min * (
                 self.cfg.sigma_max / self.cfg.sigma_min
             )**(2 * t) / (
