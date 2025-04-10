@@ -6,111 +6,130 @@ from conf import diffusion_path
 
 
 class GaussianPath:
-    def __init__(self, cfg):
+    """
+    Gaussian conditional probability path.
+    """
+    def __init__(self, cfg, target_distribution_at_time_1=False):
+        r"""
+        Parameters
+        ----------
+        cfg: conf.diffusion_path.DiffusionPath
+            The configuration of the Gaussian probability path.
+
+        target_distribution_at_time_1: bool
+            True if the probability path approximates the target distribution
+            when :math:`t = 1` and is the noise distribution at :math:`t = 0`.
+            Otherwise, the path approximates the target distribution when
+            :math:`t = 0`.
+        """
         self.cfg = cfg
+        self.target_distribution_at_time_1 = target_distribution_at_time_1
 
 
 class ConditionalOptimalTransport(GaussianPath):
+    r"""
+    This probability path approximates the target distribution when
+    :math:`t = 1` and is the noise distribution at :math:`t = 0`.
+
+    .. warning::
+       Behavior for `target_distribution_at_time_1=False` is not implemented.
+    """
     def sample_time(self, t_shape, **kwargs):
         return torch.rand(t_shape, **kwargs)
 
     def linspace_time(self, time_step_count, **kwargs):
         return torch.linspace(0., 1., time_step_count, **kwargs)
 
-    def mean(self, t, x1):
+    def mean(self, t, data):
         """
         The mean of the Gaussian conditional probability path.
 
         Parameters
         ----------
         t: torch.Tensor
-            Time in :math:`[0, 1]` along the probability path which is
-            approximately the target distribution when :math:`t = 1` and is the
-            noise distribution at :math:`t = 0`.
+            Time along the probability path.
 
-        x1: torch.Tensor
+        data: torch.Tensor
             Sample from the target distribution.
 
         Returns
         -------
         torch.Tensor
         """
-        return t * x1
+        return t * data
 
-    def std(self, t, x1):
+    def std(self, t, data):
         """
         The standard devation of the Gaussian conditional probability path.
 
         Parameters
         ----------
         t: torch.Tensor
-            Time in :math:`[0, 1]` along the probability path which is
-            approximately the target distribution when :math:`t = 1` and is the
-            noise distribution at :math:`t = 0`.
+            Time along the probability path.
 
-        x1: torch.Tensor
+        data: torch.Tensor
             Sample from the target distribution.
 
         Returns
         -------
         torch.Tensor
-
-        Notes
-        -----
-        Eqn.(30) of [1]_ modified to be continuous as t -> 0.
-        But, we divide by 2*log(sigma_max/sigma_min)? Why?
-
-        References
-        ----------
-        .. [1] Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S., & Poole, B. (2021).
-           Score-Based Generative Modeling through Stochastic Differential Equations
-           (No. arXiv:2011.13456). arXiv. http://arxiv.org/abs/2011.13456
         """
         return 1 - (1 - self.cfg.sigma_min) * t
 
-    def dt_std(self, t, x1):
+    def dt_std(self, t, data):
         return torch.full_like(t, -1 + self.cfg.sigma_min)
 
 
 class VarianceExploding(GaussianPath):
+    r"""
+    This probability path approximates the target distribution when
+    :math:`t = 0` and is the noise distribution at :math:`t = 1`.
+    The probability path can be reversed by setting
+    `target_distribution_at_time_1=True`.
+    """
+    def _reverse_time(self, t):
+        r"""
+        Reflects the time `t` in the interval :math:`[t_\min, 1]`.
+        """
+        return 1 - t + self.cfg.time_min
+
     def sample_time(self, t_shape, **kwargs):
-        return torch.rand(t_shape, **kwargs) * (1 - self.cfg.diffusion_path.time_min) + self.cfg.diffusion_path.time_min
+        return torch.rand(t_shape, **kwargs) * (1 - self.cfg.time_min) + self.cfg.time_min
 
     def linspace_time(self, time_step_count, **kwargs):
-        return torch.linspace(1., self.cfg.diffusion_path.time_min, time_step_count, **kwargs)
+        t = torch.linspace(1., self.cfg.time_min, time_step_count, **kwargs)
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
+        return t
 
-    def mean(self, t, x0):
+    def mean(self, t, data):
         """
         The mean of the Gaussian conditional probability path.
 
         Parameters
         ----------
         t: torch.Tensor
-            Time in :math:`[0, 1]` along the probability path which is
-            approximately the target distribution when :math:`t = 0` and is the
-            noise distribution at :math:`t = 1`.
+            Time along the probability path.
 
-        x0: torch.Tensor
+        data: torch.Tensor
             Sample from the target distribution.
 
         Returns
         -------
         torch.Tensor
         """
-        return x0
+        return data
 
-    def std(self, t, x0):
-        """
+    def std(self, t, data):
+        r"""
         The standard devation of the Gaussian conditional probability path.
 
         Parameters
         ----------
         t: torch.Tensor
-            Time in :math:`[0, 1]` along the probability path which is
-            approximately the target distribution when :math:`t = 0` and is the
-            noise distribution at :math:`t = 1`.
+            Time along the probability path.
 
-        x0: torch.Tensor
+        data: torch.Tensor
             Sample from the target distribution.
 
         Returns
@@ -119,8 +138,10 @@ class VarianceExploding(GaussianPath):
 
         Notes
         -----
-        Eqn.(30) of [1]_ modified to be continuous as t -> 0.
-        But, we divide by 2*log(sigma_max/sigma_min)? Why?
+        Eqn.(30) of [1]_ modified to be continuous as the probability path
+        approaches the target distribution.
+        But, we divide by :math:`2*\log(\sigma_\max/\sigma_\min)`? Why?
+        This appears to simplify the form of :math:`g(t)`.
 
         References
         ----------
@@ -128,14 +149,20 @@ class VarianceExploding(GaussianPath):
            Score-Based Generative Modeling through Stochastic Differential Equations
            (No. arXiv:2011.13456). arXiv. http://arxiv.org/abs/2011.13456
         """
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
         return self.cfg.sigma_min * (
             ((self.cfg.sigma_max / self.cfg.sigma_min)**(2 * t) - 1)
             / 2
             / np.log(self.cfg.sigma_max / self.cfg.sigma_min)
         )**(1/2)
 
-    def dt_std(self, t, x0):
-        return torch.full_like(
+    def dt_std(self, t, data):
+        change_of_time_variable = 1
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
+            change_of_time_variable = -1
+        return change_of_time_variable * torch.full_like(
             t,
             self.cfg.sigma_min * (
                 self.cfg.sigma_max / self.cfg.sigma_min
@@ -147,14 +174,18 @@ class VarianceExploding(GaussianPath):
         )
 
     def g(self, t):
-        # this is sqrt(d/dt (self.sigma(t))^2)
-        return self.cfg.diffusion_path.sigma_min * (self.cfg.diffusion_path.sigma_max / self.cfg.diffusion_path.sigma_min)**t
+        r"""
+        :math:`\sqrt{\frac{\mathrm{d}}{\mathrm{d}t} \sigma_t^2}`
+        """
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
+        return self.cfg.sigma_min * (self.cfg.sigma_max / self.cfg.sigma_min)**t
 
 
-def get_diffusion_path(cfg):
+def get_diffusion_path(cfg, target_distribution_at_time_1=False):
     if isinstance(cfg, diffusion_path.ConditionalOptimalTransport):
-        return ConditionalOptimalTransport(cfg)
+        return ConditionalOptimalTransport(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
     elif isinstance(cfg, diffusion_path.VarianceExploding):
-        return VarianceExploding(cfg)
+        return VarianceExploding(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
     else:
         raise ValueError(f'Unknown diffusion path: {cfg}')
