@@ -19,6 +19,8 @@ def test_variance_exploding_target_distribution_at_time_0(engine):
     t_noise = torch.tensor(1.)
     assert path.mean(t_data, data) == data
     assert path.mean(t_noise, data) == data
+    assert path.dt_mean(t_data, data) == 0
+    assert path.dt_mean(t_noise, data) == 0
     assert path.std(t_data, data) < path.std(t_noise, data)
     assert path.dt_std(t_data, data) < path.dt_std(t_noise, data)
     assert path.g(t_data) < path.g(t_noise)
@@ -36,6 +38,8 @@ def test_variance_exploding_target_distribution_at_time_1(engine):
     t_data = torch.tensor(1.)
     assert path.mean(t_noise, data) == data
     assert path.mean(t_data, data) == data
+    assert path.dt_mean(t_data, data) == 0
+    assert path.dt_mean(t_noise, data) == 0
     assert path.std(t_data, data) < path.std(t_noise, data)
     assert -path.dt_std(t_data, data) < -path.dt_std(t_noise, data)
     assert path.g(t_data) < path.g(t_noise)
@@ -53,5 +57,7 @@ def test_conditional_optimal_transport_target_distribution_at_time_1(engine):
     t_data = torch.tensor(1.)
     assert path.mean(t_noise, data) == t_noise * data
     assert path.mean(t_data, data) == t_data * data
+    assert path.dt_mean(t_data, data) == data
+    assert path.dt_mean(t_noise, data) == data
     assert path.std(t_data, data) < path.std(t_noise, data)
     assert path.dt_std(t_data, data) == path.dt_std(t_noise, data)

@@ -57,6 +57,9 @@ class ConditionalOptimalTransport(GaussianPath):
         """
         return t * data
 
+    def dt_mean(self, t, data):
+        return data
+
     def std(self, t, data):
         """
         The standard devation of the Gaussian conditional probability path.
@@ -118,6 +121,9 @@ class VarianceExploding(GaussianPath):
         torch.Tensor
         """
         return data
+
+    def dt_mean(self, t, data):
+        return data * 0
 
     def std(self, t, data):
         r"""
