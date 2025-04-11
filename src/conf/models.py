@@ -79,6 +79,14 @@ class FlowMatching(Trainable):
 
     guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)
 
+    def __post_init__(self):
+        if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
+            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+                raise ValueError(
+                    'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
+                    f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
+                )
+
 
 class FlowMatchingMarginal(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
@@ -99,3 +107,11 @@ class FlowMatchingMarginal(Trainable):
     divergence_matching_use_hutchinson_trace_for_target_divergence: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
     guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)
+
+    def __post_init__(self):
+        if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
+            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+                raise ValueError(
+                    'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
+                    f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
+                )
