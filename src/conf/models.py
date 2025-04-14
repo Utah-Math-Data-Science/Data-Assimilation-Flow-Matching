@@ -21,7 +21,11 @@ class Model(orm.InheritableTable):
     resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     inflation_scale = orm.OneToManyField(inflation.InflationScale, default=omegaconf.MISSING)
     use_state_perturbation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
-    state_perturbation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-3)
+    state_perturbation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0)
+
+    def __post_init_(self):
+        if self.use_state_perturbation and self.state_perturbation_std == 0:
+            raise ValueError('Expected model.state_perturbation_std to be greater than zero (i.e., set model.state_perturbation_std=0.1)')
 
 
 class Trainable(Model):
