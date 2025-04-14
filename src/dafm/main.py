@@ -119,7 +119,8 @@ def get_run_dir(hydra_init=utils.HYDRA_INIT, commit=True):
         conf.orm.create_all(engine)
         with conf.sa.orm.Session(engine, expire_on_commit=False) as db:
             cfg = conf.orm.instantiate_and_insert_config(db, OmegaConf.to_container(cfg, resolve=True))
-            if commit and '-c' not in sys.argv:
+            if commit:
+            # if commit and '-c' not in sys.argv:
                 db.commit()
                 cfg.run_dir.mkdir(exist_ok=True)
             return last_override, str(cfg.run_dir)
