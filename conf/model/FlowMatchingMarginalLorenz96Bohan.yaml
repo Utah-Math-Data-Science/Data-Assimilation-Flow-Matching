@@ -1,0 +1,5 @@
+defaults:
+  - FlowMatchingMarginal
+
+diffusion_path:
+  sigma_min: 1e-2

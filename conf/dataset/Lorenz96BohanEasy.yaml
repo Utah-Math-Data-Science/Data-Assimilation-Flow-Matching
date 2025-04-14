@@ -12,5 +12,5 @@ true_state_initial_condition_std: 1.
 predicted_state_initial_condition_std: .1
 integrator: RUNGE_KUTTA_4
 model_std: 0.
-observation_std: .1
+observation_std: 1.
 predicted_state_model_std: 0.

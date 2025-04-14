@@ -19,4 +19,4 @@ integrator: RUNGE_KUTTA_4
 model_std: 0.
 predicted_state_model_std: 0.
 # .7, 1.
-observation_std: .7
+observation_std: 1.
