@@ -8,7 +8,7 @@ import hydra
 import hydra_orm.utils
 from hydra_orm import orm
 
-from conf import datasets, flow_matching_guidance, models, diffusion_path, observe
+from conf import datasets, flow_matching_guidance, inflation_scale, models, diffusion_path, observe
 from dafm import utils
 
 
@@ -57,6 +57,8 @@ orm.store_config(flow_matching_guidance.No, group=f'{Conf.model.key}/{models.Flo
 orm.store_config(flow_matching_guidance.MonteCarlo, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
 orm.store_config(flow_matching_guidance.Local, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
 orm.store_config(flow_matching_guidance.Constant, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}/{flow_matching_guidance.Local.schedule.key}')
+orm.store_config(inflation_scale.NoScaling, group=f'{Conf.model.key}/{models.Model.inflation_scale.key}')
+orm.store_config(inflation_scale.ConstantScale, group=f'{Conf.model.key}/{models.Model.inflation_scale.key}')
 orm.store_config(models.FlowMatching, group=Conf.model.key, name=f'_{models.FlowMatching.__name__}')
 orm.store_config(models.FlowMatchingMarginal, group=Conf.model.key, name=f'_{models.FlowMatchingMarginal.__name__}')
 orm.store_config(diffusion_path.ConditionalOptimalTransport, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')

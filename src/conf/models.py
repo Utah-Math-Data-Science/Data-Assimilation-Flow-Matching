@@ -8,12 +8,20 @@ from hydra_orm import orm
 import sqlalchemy as sa
 
 from conf import diffusion_path as diff_path
+from conf import inflation_scale as inflation
 from conf import flow_matching_guidance
 
 
 class Model(orm.InheritableTable):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
     ignore_observations: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    inflation_scale = orm.OneToManyField(inflation.InflationScale, default=omegaconf.MISSING)
+    use_state_perturbation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    state_perturbation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-3)
 
 
 class Trainable(Model):
@@ -42,6 +50,7 @@ class Sampler(enum.Enum):
 class ScoreMatching(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(diffusion_path=omegaconf.MISSING),
+        dict(inflation_scale=omegaconf.MISSING),
         '_self_',
     ])
 
@@ -62,6 +71,7 @@ class ScoreMatching(Trainable):
 class FlowMatching(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(diffusion_path=omegaconf.MISSING),
+        dict(inflation_scale=omegaconf.MISSING),
         dict(guidance=omegaconf.MISSING),
         '_self_',
     ])
@@ -91,6 +101,7 @@ class FlowMatching(Trainable):
 class FlowMatchingMarginal(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(diffusion_path=omegaconf.MISSING),
+        dict(inflation_scale=omegaconf.MISSING),
         dict(guidance=omegaconf.MISSING),
         '_self_',
     ])

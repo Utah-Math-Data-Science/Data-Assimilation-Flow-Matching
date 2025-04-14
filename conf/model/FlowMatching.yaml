@@ -1,6 +1,7 @@
 defaults:
   - _FlowMatching
   - override diffusion_path: ConditionalOptimalTransport
+  - override inflation_scale: NoScaling
   - override guidance: 'No'
   - _self_
 

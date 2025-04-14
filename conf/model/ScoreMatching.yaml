@@ -1,6 +1,7 @@
 defaults:
   - _ScoreMatching
   - override diffusion_path: VarianceExploding
+  - override inflation_scale: NoScaling
   - _self_
 
 batch_size: ${oc.select:..dataset.predicted_state_count,1}

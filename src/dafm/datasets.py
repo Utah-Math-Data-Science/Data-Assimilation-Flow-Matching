@@ -8,6 +8,7 @@ from tqdm import tqdm
 from torchdiffeq import odeint
 
 import conf.datasets
+import conf.inflation_scale
 import dafm.observe
 
 
@@ -167,6 +168,22 @@ class PredictedStatesAndObservation(IterableDataset):
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_t_now_and_next, sampled_state, next_observation, ignore_observation
             else:
                 sampled_state = next_predicted_state
+            if self.model.cfg.use_state_perturbation:
+                sampled_state = sampled_state + torch.randn_like(sampled_state) * self.model.cfg.state_perturbation_std
+            if not isinstance(self.model.cfg.inflation_scale, conf.inflation_scale.NoScaling):
+                sampled_state_mean = reduce(
+                    sampled_state,
+                    'predicted_state_count dim -> 1 dim',
+                    'mean',
+                )
+                r2_from_mean = reduce(
+                    (sampled_state - sampled_state_mean).square(),
+                    'predicted_state_count dim -> predicted_state_count 1',
+                    'sum',
+                )
+                sampled_state = (
+                    sampled_state_mean + self.model.inflation_scale(r2_from_mean) * (sampled_state - sampled_state_mean)
+                )
             self.dataset.data['predicted_state'].append(sampled_state)
 
 

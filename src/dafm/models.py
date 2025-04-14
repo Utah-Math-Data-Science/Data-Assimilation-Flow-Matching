@@ -8,7 +8,9 @@ from einops import rearrange, reduce, repeat
 
 import conf.models
 import conf.diffusion_path
+import conf.inflation_scale
 import dafm.diffusion_path
+import dafm.inflation_scale
 from dafm import flow_matching_guidance, utils
 
 
@@ -54,12 +56,13 @@ class ResidualBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, cfg, state_dimension, observation_std, diffusion_path):
+    def __init__(self, cfg, state_dimension, observation_std, diffusion_path, inflation_scale):
         super().__init__()
         self.cfg = cfg
         self.state_dimension = state_dimension
         self.observation_std = observation_std
         self.diffusion_path = diffusion_path
+        self.inflation_scale = inflation_scale
         if cfg.embedding_dimension % 2 != 0:
             raise ValueError(
                 'The embedding dimension must be even because it is twice the number of frequencies for the Gaussian Fourier projection of the time embedding.'
@@ -176,8 +179,8 @@ class ScoreMatching(Model):
 
 
 class FlowMatching(Model):
-    def __init__(self, cfg, state_dimension, observation_std, diffusion_path, guidance):
-        super().__init__(cfg, state_dimension, observation_std, diffusion_path)
+    def __init__(self, cfg, state_dimension, observation_std, diffusion_path, inflation_scale, guidance):
+        super().__init__(cfg, state_dimension, observation_std, diffusion_path, inflation_scale)
         self.guidance = guidance
 
     def forward(self, time, state):
@@ -388,10 +391,11 @@ class FlowMatching(Model):
 
 
 class FlowMatchingMarginal(nn.Module):
-    def __init__(self, cfg, diffusion_path, guidance):
+    def __init__(self, cfg, diffusion_path, inflation_scale, guidance):
         super().__init__()
         self.cfg = cfg
         self.diffusion_path = diffusion_path
+        self.inflation_scale = inflation_scale
         self.guidance = guidance
 
     def get_optimizer(self, time_step, ignore_observation):
@@ -489,16 +493,17 @@ class FlowMatchingMarginal(nn.Module):
 
 
 def get_model(cfg, state_dimension, observation_std):
+    inflation_scale = dafm.inflation_scale.get_inflation_scale(cfg.inflation_scale)
     if isinstance(cfg, conf.models.ScoreMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
-        return ScoreMatching(cfg, state_dimension, observation_std, diffusion_path)
+        return ScoreMatching(cfg, state_dimension, observation_std, diffusion_path, inflation_scale)
     elif isinstance(cfg, conf.models.FlowMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatching(cfg, state_dimension, observation_std, diffusion_path, guidance)
+        return FlowMatching(cfg, state_dimension, observation_std, diffusion_path, inflation_scale, guidance)
     elif isinstance(cfg, conf.models.FlowMatchingMarginal):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatchingMarginal(cfg, diffusion_path, guidance)
+        return FlowMatchingMarginal(cfg, diffusion_path, inflation_scale, guidance)
     else:
         raise ValueError(f'Unknown model: {cfg}')
