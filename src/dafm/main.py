@@ -66,8 +66,8 @@ def main(cfg):
     with conf.sa.orm.Session(engine) as db:
         cfg = conf.orm.instantiate_and_insert_config(db, OmegaConf.to_container(cfg, resolve=True))
         db.commit()
-        pprint.pp(cfg)
         log.info('Command: python %s', ' '.join(sys.argv))
+        log.info(pprint.pformat(cfg))
         log.info('Output directory: %s', cfg.run_dir)
 
     pl.seed_everything(cfg.rng_seed)
