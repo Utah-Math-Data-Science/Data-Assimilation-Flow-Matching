@@ -100,8 +100,8 @@ where:
 
          model/inflation_scale=ConstantScale model.inflation_scale.constant=1.01
 
-Running data assimilation runs in parallel
-==========================================
+Running data assimilation experiments in parallel
+=================================================
 
 .. warning::
 
