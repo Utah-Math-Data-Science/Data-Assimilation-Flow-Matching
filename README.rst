@@ -34,7 +34,7 @@ Supplementary Documentation
 ===========================
 
 * `Hydra <https://hydra.cc/docs/1.3/intro/>`_: Command-line inferface configuration library for configuring the experiments in this project.
-* `Hydra ORM <https://github.com/reepoi/hydra-orm>`_: My library for saving experiment configurations to a `SQLite <https://sqlite.org/>`_ database.
+* `Hydra ORM <https://github.com/reepoi/hydra-orm>`_: My library for saving experiment configurations to an `SQLite <https://sqlite.org/>`_ database.
 * `PyTorch <https://pytorch.org/docs/2.4/index.html>`_: Library for implementing the models.
 * `PyTorch Lightning <https://lightning.ai/docs/pytorch/2.5.0/>`_: Library for handling model training.
 
