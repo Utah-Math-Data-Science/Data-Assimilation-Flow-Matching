@@ -1,0 +1,22 @@
+defaults:
+  - _Lorenz96
+  - override observe: EveryNthDimension
+  - _self_
+
+observe:
+  n: 2
+state_dimension: 40
+# 10, 20, 40, 60, 100, 200
+predicted_state_count: 100
+time_step_count: 2500
+time_step_count_drop_first: 1000
+time_step_size: .025
+true_state_initial_condition_mean: 5.
+true_state_initial_condition_std: 1.
+predicted_state_initial_condition_std: .1
+observe_every_n_time_steps: 2
+integrator: RUNGE_KUTTA_4
+model_std: 0.
+predicted_state_model_std: 0.
+# .7, 1.
+observation_std: 1.
