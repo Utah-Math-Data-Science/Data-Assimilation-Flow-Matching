@@ -321,7 +321,12 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
         """
         if self.target_distribution_at_time_1:
             raise NotImplementedError()
-        return self.mean(t, data) + torch.randn_like(data) * self.std(t, data)
+        noise = torch.randn_like(data)
+        if self.cfg.sample_noise_scale_std:
+            noise = noise * self.std(t, data)
+        if self.cfg.sample_noise_add_mean:
+            noise = self.mean(t, data) + noise
+        return noise
 
 
 def get_diffusion_path(cfg, target_distribution_at_time_1=False):
