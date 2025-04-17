@@ -81,6 +81,26 @@ class ConditionalOptimalTransport(GaussianPath):
     def dt_std(self, t, data):
         return t * 0 - 1 + self.cfg.sigma_min
 
+    def sample_noise(self, t, data):
+        """
+        Sample noise with mean zero and standard deviation at time :math:`t`.
+        This method makes sense when :math:`t` is the time where the
+        probability path is closest to the noise distribution.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        data: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        return torch.randn_like(data) * self.std(t, data)
+
 
 class VarianceExploding(GaussianPath):
     r"""
@@ -185,6 +205,26 @@ class VarianceExploding(GaussianPath):
             t = self._reverse_time(t)
         return self.cfg.sigma_min * (self.cfg.sigma_max / self.cfg.sigma_min)**t
 
+    def sample_noise(self, t, data):
+        """
+        Sample noise with mean zero and standard deviation at time :math:`t`.
+        This method makes sense when :math:`t` is the time where the
+        probability path is closest to the noise distribution.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        data: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        return torch.randn_like(data) * diffusion_path.std(t, data)
+
 
 class Bao2024EnsembleScoreMatching(GaussianPath):
     def _reverse_time(self, t):
@@ -260,6 +300,28 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
         dt_squared_beta = 1 - self.cfg.epsilon_beta
         dt_log_alpha = -(1 - self.cfg.epsilon_alpha) / self.alpha(t)
         return (dt_squared_beta - 2 * dt_log_alpha * self.beta(t).square()).sqrt()
+
+    def sample_noise(self, t, data):
+        """
+        Sample noise with mean zero and standard deviation at time :math:`t`.
+        This method makes sense when :math:`t` is the time where the
+        probability path is closest to the noise distribution.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        data: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        if self.target_distribution_at_time_1:
+            raise NotImplementedError()
+        return self.mean(t, data) + torch.randn_like(data) * self.std(t, data)
 
 
 def get_diffusion_path(cfg, target_distribution_at_time_1=False):

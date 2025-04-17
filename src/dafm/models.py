@@ -126,12 +126,12 @@ class ScoreMatching(Model):
     @classmethod
     def _sampling_steps(cls, cfg, diffusion_path, forward, observation_std, observation_likelihood_score_damping, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or cfg.sampling_time_step_count
-        diffusion_time = diffusion_path.linspace_time(time_step_count, device=data.device)
-        minus_time_step_size = diffusion_time[1] - diffusion_time[0]
+        path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
+        minus_time_step_size = path_time[1] - path_time[0]
         minus_time_step_size_abs_sqrt = minus_time_step_size.abs().sqrt()
-        noise = torch.randn_like(data) * diffusion_path.std(1, data)
+        noise = diffusion_path.sample_noise(path_time[0], data)
         xt = noise
-        for time_step, t_now_and_next in enumerate(diffusion_time.unfold(0, 2, 1)):
+        for time_step, t_now_and_next in enumerate(path_time.unfold(0, 2, 1)):
             t_now = t_now_and_next[0]
             done = False
             yield done, time_step, t_now, xt
@@ -408,12 +408,7 @@ class FlowMatching(Model):
     def _sampling_steps(cls, cfg, diffusion_path, forward, guidance, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or cfg.sampling_time_step_count
         path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
-        if isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
-            noise = torch.randn_like(data)
-        elif isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
-            noise = torch.randn_like(data) * diffusion_path.std(1, data)
-        else:
-            raise ValueError(f'Unknown diffusion path: {cfg.diffusion_path}')
+        noise = diffusion_path.sample_noise(path_time[0], data)
         if isinstance(cfg.guidance, flow_matching_guidance.No) or observation is None or cfg.ignore_observations:
             velocity = forward
         else:
@@ -439,6 +434,7 @@ class FlowMatching(Model):
                 xt = xt + time_step_size * velocity(t_now, xt)
                 state_out = xt
             elif cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+                raise NotImplementedError()
                 if not isinstance(cfg.diffusion_path, conf.diffusion_path.VarianceExploding):
                     raise ValueError(
                         f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {cfg.diffusion_path.__class__.__name__}.'
