@@ -162,14 +162,14 @@ class ScoreMatching(Model):
 
             g = diffusion_path.g(t_now)
             if cfg.sampler is conf.models.Sampler.EULER:
-                xt = xt - g.square() * score * minus_time_step_size
+                xt = xt + minus_time_step_size * (diffusion_path.f(t_now, xt) - g.square() * score)
                 state_out = xt
             elif cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
-                state_drift = xt - g.square() * score * minus_time_step_size
-                xt = state_drift + g * torch.randn_like(xt) * minus_time_step_size_abs_sqrt
-                state_out = state_drift
+                state_drift = xt + minus_time_step_size * (diffusion_path.f(t_now, xt) - g.square() * score)
+                xt = state_drift + minus_time_step_size_abs_sqrt * g * torch.randn_like(xt)
+                state_out = xt
             else:
-                raise ValueError(f'Unsupported sampler for {cls.__name__}: {cfg.sampler}')
+                raise ValueError(f'Unsupported sampler for {cfg.__name__}: {cfg.sampler}')
 
         # no noise in final step
         # maybe this is done to handle the discontinuity of the variance exploding path as t -> 0.

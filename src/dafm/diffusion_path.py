@@ -197,6 +197,9 @@ class VarianceExploding(GaussianPath):
             )**(1/2)
         )
 
+    def f(self, t, data):
+        return 0.
+
     def g(self, t):
         r"""
         :math:`\sqrt{\frac{\mathrm{d}}{\mathrm{d}t} \sigma_t^2}`
@@ -244,6 +247,9 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
 
     def alpha(self, t):
         return 1 - t * (1 - self.cfg.epsilon_alpha)
+
+    def dt_log_alpha(self, t):
+        return -(1 - self.cfg.epsilon_alpha) / self.alpha(t)
 
     def beta(self, t):
         return (self.cfg.epsilon_beta + t * (1 - self.cfg.epsilon_beta))**(1/2)
@@ -294,12 +300,14 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
     def dt_std(self, t, data):
         raise NotImplementedError()
 
+    def f(self, t, data):
+        return self.dt_log_alpha(t) * data
+
     def g(self, t):
         if self.target_distribution_at_time_1:
             raise NotImplementedError()
         dt_squared_beta = 1 - self.cfg.epsilon_beta
-        dt_log_alpha = -(1 - self.cfg.epsilon_alpha) / self.alpha(t)
-        return (dt_squared_beta - 2 * dt_log_alpha * self.beta(t).square()).sqrt()
+        return (dt_squared_beta - 2 * self.dt_log_alpha(t) * self.beta(t).square()).sqrt()
 
     def sample_noise(self, t, data):
         """
