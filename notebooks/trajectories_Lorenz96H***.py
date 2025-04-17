@@ -48,6 +48,8 @@ def _():
 @app.cell
 def _():
     alt_ids = {
+        # H300
+        ('daas0zbq', r'SM-TF ($\epsilon_\alpha=0.5$, $\epsilon_\beta=0.025$)'): {},
         ('q1h1p9nx', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.0$)'): {},
         # ('7wbiwugd', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.05$)'): {},
         # ('vndtd2t3', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.1$)'): {},

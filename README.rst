@@ -53,27 +53,28 @@ where:
 
    * ``DoubleWell``: One-dimensional potential well system from [Bao2024a]_.
    * ``Lorenz63``: Three-dimensional chaotic butterfly attractor system.
-   * ``Lorenz96``: :math:`N`-dimensional chaotic system with parameters from [Bao2024a]_.
-   * ``Lorenz96BohanEasy``: `Lorenz96` with an easier set of parameters.
-   * ``Lorenz96Bohan``: `Lorenz96` with a harder set of parameters.
+   * ``Lorenz96Bao2024ML``: :math:`N`-dimensional chaotic system with parameters from [Bao2024a]_.
+   * ``Lorenz96H100``: `Lorenz96` with a set of parameters with difficulty rating `H100`.
+   * ``Lorenz96H200``: `Lorenz96` with a set of parameters with difficulty rating `H200`.
+   * ``Lorenz96H300``: `Lorenz96` with a set of parameters with difficulty rating `H300`.
 
 * ``<model>`` is one of:
 
    * ``ScoreMatching``: The score matching filter described in [Bao2024a]_.
 
       * The default parameters are for ``dataset=DoubleWell``.
-        Use ``ScoreMatchingLorenz96`` for ``Lorenz96``, and ``ScoreMatchingLorenz96Bohan`` for ``Lorenz96BohanEasy`` and ``Lorenz96Bohan``.
+        Use ``ScoreMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``ScoreMatchingLorenz96`` for ``Lorenz96H***``.
 
    * ``ScoreMatchingMarginal``: The score matching filter described in [Bao2024b]_.
    * ``FlowMatching``: Our flow matching filter that requires training.
 
       * The default parameters are for ``dataset=DoubleWell``.
-        Use ``FlowMatchingLorenz96`` for ``Lorenz96``, and ``FlowMatchingLorenz96Bohan`` for ``Lorenz96BohanEasy`` and ``Lorenz96Bohan``.
+        Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
 
    * ``FlowMatchingMarginal``: Our flow matching filter that does **not** require training.
 
       * The default parameters are for ``dataset=DoubleWell``.
-        Use ``FlowMatchingLorenz96Bohan`` for ``Lorenz96BohanEasy`` and ``Lorenz96Bohan``.
+        Use ``FlowMatchingLorenz96`` for ``Lorenz96Bao2024ML`` and ``Lorenz96H***``.
 
 * ``<other_overrides>...``: Other overrides for the model.
    Add the flag ``-c job`` to the Python command see what can be overridden from the command line.

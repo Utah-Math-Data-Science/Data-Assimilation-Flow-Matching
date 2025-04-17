@@ -1,0 +1,10 @@
+defaults:
+  - ScoreMatching
+  - _self_
+
+epoch_count: 1000
+learning_rate_when_training_on_initial_predicted_state: 1e-2
+learning_rate: 1e-3
+
+embedding_dimension: 200
+sampling_time_step_count: 800
