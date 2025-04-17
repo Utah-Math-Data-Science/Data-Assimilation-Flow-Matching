@@ -225,7 +225,7 @@ class ScoreMatchingMarginal(nn.Module):
         )
 
     def observation_likelihood_score_damping(self, t):
-        return (1 - 2 * t).clamp(min=0)
+        return 1 - t
 
     @torch.no_grad
     def sampling_steps(self, data, observation, observe, time_step_count=None):
@@ -456,7 +456,7 @@ class FlowMatching(Model):
                 xt = xt + time_step_size * (xdot_now + velocity(t_next, temp)) / 2
                 state_out = xt
             else:
-                raise ValueError(f'Unsupported sampler for {cls.__name__}: {cfg.sampler}')
+                raise ValueError(f'Unsupported sampler for {cfg.__name__}: {cfg.sampler}')
 
         done = True
         yield done, time_step, t_now, noise, state_out
