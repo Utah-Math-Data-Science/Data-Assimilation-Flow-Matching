@@ -65,9 +65,6 @@ where:
         Use ``ScoreMatchingLorenz96`` for ``Lorenz96``, and ``ScoreMatchingLorenz96Bohan`` for ``Lorenz96BohanEasy`` and ``Lorenz96Bohan``.
 
    * ``ScoreMatchingMarginal``: The score matching filter described in [Bao2024b]_.
-
-      * **Implementation coming soon.**
-
    * ``FlowMatching``: Our flow matching filter that requires training.
 
       * The default parameters are for ``dataset=DoubleWell``.
