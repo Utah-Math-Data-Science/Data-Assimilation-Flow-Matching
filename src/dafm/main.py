@@ -101,7 +101,13 @@ def main(cfg):
         callbacks=cbs,
     )
 
-    trainer.fit(data_assimilation)
+    try:
+        trainer.fit(data_assimilation)
+    except StopIteration as e:
+        if cfg.model.epoch_count == 0 and cfg.model.epoch_count_sampling == 0:
+            pass
+        else:
+            raise e
 
 
 def get_run_dir(hydra_init=utils.HYDRA_INIT, commit=True):
