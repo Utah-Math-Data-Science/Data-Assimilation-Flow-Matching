@@ -38,7 +38,7 @@ class Dataset(orm.InheritableTable):
 
 
 class DoubleWell(Dataset):
-    state_dimension: int = field(init=False, default=1)
+    state_dimension: int = field(default=1)
     model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.2)
     observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.1)
     true_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.02)
@@ -47,7 +47,7 @@ class DoubleWell(Dataset):
 
 
 class Lorenz63(Dataset):
-    state_dimension: int = field(init=False, default=3)
+    state_dimension: int = field(default=3)
     model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.2)
     observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.1)
     true_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.02)

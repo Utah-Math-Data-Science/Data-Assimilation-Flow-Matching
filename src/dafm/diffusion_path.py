@@ -186,10 +186,88 @@ class VarianceExploding(GaussianPath):
         return self.cfg.sigma_min * (self.cfg.sigma_max / self.cfg.sigma_min)**t
 
 
+class Bao2024EnsembleScoreMatching(GaussianPath):
+    def _reverse_time(self, t):
+        r"""
+        Reflects the time `t` in the interval :math:`[t_\min, 1]`.
+        """
+        return 1 - t
+
+    def sample_time(self, t_shape, **kwargs):
+        return torch.rand(t_shape, **kwargs)
+
+    def linspace_time(self, time_step_count, **kwargs):
+        t = torch.linspace(1., 0., time_step_count, **kwargs)
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
+        return t
+
+    def alpha(self, t):
+        return 1 - t * (1 - self.cfg.epsilon_alpha)
+
+    def beta(self, t):
+        return (self.cfg.epsilon_beta + t * (1 - self.cfg.epsilon_beta))**(1/2)
+
+    def mean(self, t, data):
+        """
+        The mean of the Gaussian conditional probability path.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        data: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
+        return self.alpha(t) * data
+
+    def dt_mean(self, t, data):
+        raise NotImplementedError()
+
+    def std(self, t, data):
+        r"""
+        The standard devation of the Gaussian conditional probability path.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        data: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        if self.target_distribution_at_time_1:
+            t = self._reverse_time(t)
+        return self.beta(t)
+
+    def dt_std(self, t, data):
+        raise NotImplementedError()
+
+    def g(self, t):
+        if self.target_distribution_at_time_1:
+            raise NotImplementedError()
+        dt_squared_beta = 1 - self.cfg.epsilon_beta
+        dt_log_alpha = -(1 - self.cfg.epsilon_alpha) / self.alpha(t)
+        return (dt_squared_beta - 2 * dt_log_alpha * self.beta(t).square()).sqrt()
+
+
 def get_diffusion_path(cfg, target_distribution_at_time_1=False):
     if isinstance(cfg, diffusion_path.ConditionalOptimalTransport):
         return ConditionalOptimalTransport(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
     elif isinstance(cfg, diffusion_path.VarianceExploding):
         return VarianceExploding(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
+    elif isinstance(cfg, diffusion_path.Bao2024EnsembleScoreMatching):
+        return Bao2024EnsembleScoreMatching(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
     else:
         raise ValueError(f'Unknown diffusion path: {cfg}')

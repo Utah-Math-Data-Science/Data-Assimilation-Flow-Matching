@@ -123,26 +123,26 @@ class ScoreMatching(Model):
     def observation_likelihood_score_damping(self, t):
         return (1 - 2 * t).clamp(min=0)
 
-    @torch.no_grad
-    def sampling_steps(self, data, observation, observe, time_step_count=None):
-        time_step_count = time_step_count or self.cfg.sampling_time_step_count
-        diffusion_time = self.diffusion_path.linspace_time(time_step_count, device=data.device)
+    @classmethod
+    def _sampling_steps(cls, cfg, diffusion_path, forward, observation_std, observation_likelihood_score_damping, data, observation, observe, time_step_count=None):
+        time_step_count = time_step_count or cfg.sampling_time_step_count
+        diffusion_time = diffusion_path.linspace_time(time_step_count, device=data.device)
         minus_time_step_size = diffusion_time[1] - diffusion_time[0]
         minus_time_step_size_abs_sqrt = minus_time_step_size.abs().sqrt()
-        noise = torch.randn_like(data) * self.diffusion_path.std(1, data)
+        noise = torch.randn_like(data) * diffusion_path.std(1, data)
         xt = noise
         for time_step, t_now_and_next in enumerate(diffusion_time.unfold(0, 2, 1)):
-            done = False
-            yield done, time_step, t_now_and_next, xt
             t_now = t_now_and_next[0]
-            score = self(t_now, xt)
-            if observation is None or self.cfg.ignore_observations:
+            done = False
+            yield done, time_step, t_now, xt
+            score = forward(t_now, xt)
+            if observation is None or cfg.ignore_observations:
                 observation_score = 0.
             else:
                 with torch.enable_grad():
                     xt_grad = xt.detach().requires_grad_()
                     observation_likelihood_distribution = torch.distributions.Independent(
-                        torch.distributions.Normal(observation, self.observation_std),
+                        torch.distributions.Normal(observation, observation_std),
                         1,
                     )
                     log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(xt_grad))
@@ -150,32 +150,120 @@ class ScoreMatching(Model):
                         outputs=log_observation_likelihood.sum(),
                         inputs=xt_grad,
                     )
-            score = score + observation_score * self.observation_likelihood_score_damping(t_now)
+            score = score + observation_score * observation_likelihood_score_damping(t_now)
 
             # why use mean? like RMSE?
             score_norm = reduce(score.square(), 'batch dim -> batch', 'mean').sqrt()
-            score_norm_too_large = score_norm > self.cfg.sampling_max_score_norm
+            score_norm_too_large = score_norm > cfg.sampling_max_score_norm
             score[score_norm_too_large] = score[score_norm_too_large] * rearrange(
-                self.cfg.sampling_max_score_norm / score_norm[score_norm_too_large],
+                cfg.sampling_max_score_norm / score_norm[score_norm_too_large],
                 'batch -> batch 1'
             )
 
-            g = self.diffusion_path.g(t_now)
-            if self.cfg.sampler is conf.models.Sampler.EULER:
+            g = diffusion_path.g(t_now)
+            if cfg.sampler is conf.models.Sampler.EULER:
                 xt = xt - g.square() * score * minus_time_step_size
                 state_out = xt
-            elif self.cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
+            elif cfg.sampler is conf.models.Sampler.EULER_MARUYAMA:
                 state_drift = xt - g.square() * score * minus_time_step_size
                 xt = state_drift + g * torch.randn_like(xt) * minus_time_step_size_abs_sqrt
                 state_out = state_drift
             else:
-                raise ValueError(f'Unsupported sampler for {self.__class__.__name__}: {self.cfg.sampler}')
+                raise ValueError(f'Unsupported sampler for {cls.__name__}: {cfg.sampler}')
 
         # no noise in final step
         # maybe this is done to handle the discontinuity of the variance exploding path as t -> 0.
         # just use the mean of the noise distribution for the last step
         done = True
-        yield done, time_step, t_now_and_next, state_out
+        yield done, time_step, t_now, state_out
+
+    @torch.no_grad
+    def sampling_steps(self, current_states, observation, observe, time_step_count=None):
+        for done, time_step, t_now_and_next, xt in self._sampling_steps(
+            self.cfg,
+            self.diffusion_path,
+            self,
+            self.observation_std,
+            self.observation_likelihood_score_damping,
+            current_states, observation, observe,
+            time_step_count=time_step_count,
+        ):
+            yield done, time_step, t_now_and_next, xt
+
+
+class ScoreMatchingMarginal(nn.Module):
+    def __init__(self, cfg, observation_std, diffusion_path, inflation_scale):
+        super().__init__()
+        self.cfg = cfg
+        self.observation_std = observation_std
+        self.diffusion_path = diffusion_path
+        self.inflation_scale = inflation_scale
+
+    def get_optimizer(self, time_step, ignore_observation):
+        if self.cfg.train_on_initial_predicted_state and time_step == 0 and ignore_observation:
+            lr = self.cfg.learning_rate_when_training_on_initial_predicted_state
+        else:
+            lr = self.cfg.learning_rate
+        return torch.optim.Adam(self.parameters(), lr=lr)
+
+    def score(self, mean, std, time, x):
+        return -(x - mean) / std.square()
+
+    def _loss(self, mean, std, state, observation, observe):
+        raise NotImplementedError()
+
+    def _forward(self, mean, std, time, x):
+        return reduce(
+            self.weights * self.score(
+                rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
+                std,
+                time,
+                rearrange(x, 'predicted_state_count dim -> 1 predicted_state_count dim'),
+            ),
+            'particle_count predicted_state_count dim -> predicted_state_count dim',
+            'sum',
+        )
+
+    def observation_likelihood_score_damping(self, t):
+        return (1 - 2 * t).clamp(min=0)
+
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        for done, time_step, time, xt in ScoreMatching._sampling_steps(
+            self.cfg,
+            self.diffusion_path,
+            self,
+            self.observation_std,
+            self.observation_likelihood_score_damping,
+            data, observation, observe,
+            time_step_count=time_step_count,
+        ):
+            if done:
+                yield done, time_step, time, xt
+                break
+            mean = self.diffusion_path.mean(time, data[:self.cfg.particle_count])
+            std = self.diffusion_path.std(time, data[:self.cfg.particle_count])
+            conditional_distribution = torch.distributions.Independent(
+                torch.distributions.Normal(
+                    loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
+                    scale=std,
+                ),
+                1,
+            )
+            log_pt_given_x1 = rearrange(
+                conditional_distribution.log_prob(
+                    rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
+                ),
+                'particle_count predicted_state_count -> particle_count predicted_state_count 1',
+            )
+            weights = log_pt_given_x1.softmax(0)
+            if self.cfg.epoch_count_sampling > 0:
+                self.loss = partial(self._loss, mean, std, time)
+                self.weights = nn.Parameter(weights)
+            else:
+                self.weights = weights
+            self.forward = partial(self._forward, mean, std)
+            yield done, time_step, time, xt
 
 
 class FlowMatching(Model):
@@ -316,8 +404,8 @@ class FlowMatching(Model):
     def observation_likelihood_score_damping(self, t):
         return (1 - 2 * t).clamp(min=0)
 
-    @staticmethod
-    def _sampling_steps(cfg, diffusion_path, forward, guidance, data, observation, observe, time_step_count=None):
+    @classmethod
+    def _sampling_steps(cls, cfg, diffusion_path, forward, guidance, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or cfg.sampling_time_step_count
         path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
         if isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
@@ -356,7 +444,7 @@ class FlowMatching(Model):
                         f'The Euler-Maruyama sampler is only supported with the variance exploding diffusion path, not {cfg.diffusion_path.__class__.__name__}.'
                         ' Please use a different sampler (e.g., set model.sampler=EULER), or use a diffusion diffusion path (e.g., set model/diffusion_path=ConditionalOptimalTransport).'
                     )
-                g = diffusion_path.g(1 - t_now_and_next[0])
+                g = diffusion_path.g(1 - t_now)
                 done = False
                 yield done, time_step, t_now, noise, xt
                 state_drift = xt + time_step_size * velocity(t_now, xt)
@@ -372,10 +460,10 @@ class FlowMatching(Model):
                 xt = xt + time_step_size * (xdot_now + velocity(t_next, temp)) / 2
                 state_out = xt
             else:
-                raise ValueError(f'Unsupported sampler for {FlowMatching.__class__.__name__}: {cfg.sampler}')
+                raise ValueError(f'Unsupported sampler for {cls.__name__}: {cfg.sampler}')
 
         done = True
-        yield done, time_step, t_next, noise, state_out
+        yield done, time_step, t_now, noise, state_out
 
     @torch.no_grad
     def sampling_steps(self, current_states, observation, observe, time_step_count=None):
@@ -497,6 +585,9 @@ def get_model(cfg, state_dimension, observation_std):
     if isinstance(cfg, conf.models.ScoreMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
         return ScoreMatching(cfg, state_dimension, observation_std, diffusion_path, inflation_scale)
+    elif isinstance(cfg, conf.models.ScoreMatchingMarginal):
+        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
+        return ScoreMatchingMarginal(cfg, observation_std, diffusion_path, inflation_scale)
     elif isinstance(cfg, conf.models.FlowMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)

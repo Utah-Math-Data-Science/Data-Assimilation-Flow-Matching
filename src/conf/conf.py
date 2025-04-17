@@ -53,6 +53,7 @@ orm.store_config(observe.Full, group=f'{Conf.dataset.key}/{datasets.Dataset.obse
 orm.store_config(observe.EveryNthDimension, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(observe.Exponentiate, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(models.ScoreMatching, group=Conf.model.key, name=f'_{models.ScoreMatching.__name__}')
+orm.store_config(models.ScoreMatchingMarginal, group=Conf.model.key, name=f'_{models.ScoreMatchingMarginal.__name__}')
 orm.store_config(flow_matching_guidance.No, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
 orm.store_config(flow_matching_guidance.MonteCarlo, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
 orm.store_config(flow_matching_guidance.Local, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')
@@ -63,3 +64,4 @@ orm.store_config(models.FlowMatching, group=Conf.model.key, name=f'_{models.Flow
 orm.store_config(models.FlowMatchingMarginal, group=Conf.model.key, name=f'_{models.FlowMatchingMarginal.__name__}')
 orm.store_config(diffusion_path.ConditionalOptimalTransport, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')
 orm.store_config(diffusion_path.VarianceExploding, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')
+orm.store_config(diffusion_path.Bao2024EnsembleScoreMatching, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')

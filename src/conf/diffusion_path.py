@@ -14,3 +14,8 @@ class VarianceExploding(DiffusionPath):
     time_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-3)
     sigma_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)
     sigma_max: float = orm.make_field(orm.ColumnRequired(sa.Double), default=25.0)
+
+
+class Bao2024EnsembleScoreMatching(DiffusionPath):
+    epsilon_alpha: float = orm.make_field(orm.ColumnRequired(sa.Double), default=.5)
+    epsilon_beta: float = orm.make_field(orm.ColumnRequired(sa.Double), default=.025)

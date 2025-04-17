@@ -1,0 +1,9 @@
+defaults:
+  - _ScoreMatchingMarginal
+  - override diffusion_path: Bao2024EnsembleScoreMatching
+  - override inflation_scale: NoScaling
+  - _self_
+
+epoch_count: 0
+train_on_initial_predicted_state: false
+particle_count: ${oc.select:..dataset.predicted_state_count,1}

@@ -65,10 +65,33 @@ class ScoreMatching(Trainable):
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
     def __post_init__(self):
-        if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.VarianceExploding):
+        if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, omegaconf.DictConfig) and not isinstance(self.diffusion_path, diff_path.VarianceExploding):
             raise ValueError(
                 f'The score matching model only supports the variance exploding diffusion path, not {self.diffusion_path.__class__.__name__}.'
                 ' Please set model/diffusion_path=VarianceExploding.'
+            )
+
+
+class ScoreMatchingMarginal(Trainable):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(diffusion_path=omegaconf.MISSING),
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
+
+    sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
+    sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
+    sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
+
+    diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
+
+    particle_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
+
+    def __post_init__(self):
+        if self.diffusion_path != omegaconf.MISSING and isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+            raise ValueError(
+                f'The score matching marginal model does not support {self.diffusion_path.__class__.__name__}.'
+                ' Please set model/diffusion_path=VarianceExploding or model/diffusion-path=Bao2024EnsembleScoreMatching.'
             )
 
 
