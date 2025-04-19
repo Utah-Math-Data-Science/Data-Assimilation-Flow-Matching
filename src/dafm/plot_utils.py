@@ -14,25 +14,25 @@ def plot_particle_trajectories_with_histograms(
     save_name: str = 'example_fig'
 ):
     """
-    Plot particle spreads & means for each method in cfgs.
+    Plot particle spreads & means for each method in cfgs, using adaptive bar widths.
 
     Parameters
     ----------
     cfgs : dict
-        Mapping keys → config dict v.  Each v must contain:
-          - v['trajectories']: DataFrame indexed by time, with columns
-            * predicted_state_{i}_dim_{d}
-            * true_state_dim_{d} (or any non-predicted column)
+        Keys are typically tuples like ('...', method_name), values are dicts v
+        with v['trajectories']: a DataFrame indexed by time, columns including
+          - predicted_state_{i}_dim_{d}
+          - true_state_dim_{d} (or any non‑predicted column)
     dims : list[int], optional
         Which dims to plot; if None, infer from the first v.
     mode : {'width','color','no'}
         'width' or 'color' draw spreads; 'no' only draws mean lines.
     hist_bins : int
-        Number of bins per time slice.
+        Number of bins per dimension (global over all times).
     hist_step : int
-        Plot every Nth slice.
+        Plot every Nth time slice.
     max_time_steps : int, optional
-        Only plot up to this many steps (truncated to data length).
+        Cap to first N time steps.
     save_fig : bool
         If True, save PNGs instead of showing.
     save_name : str
@@ -40,30 +40,29 @@ def plot_particle_trajectories_with_histograms(
     """
 
     # 1) collect & print all method names
-    method_names = []
+    methods = []
     for key in cfgs:
         if isinstance(key, tuple) and len(key) > 1:
-            name = key[1]
+            methods.append(key[1])
         else:
-            name = str(key)
-        method_names.append(name)
-    print("Methods found:", method_names)
+            methods.append(str(key))
+    print("Methods found:", methods)
 
     # 2) loop per method
     for key, v in cfgs.items():
-        # determine method name from key
+        # determine method name
         if isinstance(key, tuple) and len(key) > 1:
             method_name = key[1]
         else:
             method_name = str(key)
 
-        # reshape trajectories
+        # prepare the trajectories DataFrame
         df = v['trajectories'].copy()
         df.index.name = 'Time'
         df = df.reset_index()
         cols = df.columns
 
-        # detect predicted vs true columns
+        # classify predicted vs. true columns by regex
         pred_pat = re.compile(r'^predicted_state_\d+_dim_\d+$')
         true_pat = re.compile(r'^(true_state|state)(_dim_\d+)?$')
         pred_cols = [c for c in cols if pred_pat.match(c)]
@@ -83,75 +82,99 @@ def plot_particle_trajectories_with_histograms(
             var_name='Source', value_name='True'
         )
 
-        # infer dims if not provided
+        # infer dimensions if not provided
         found_dims = sorted(
-            int(re.search(r'_dim_(\d+)$', s).group(1))
-            for s in pred_cols if re.search(r'_dim_(\d+)$', s)
+            int(re.search(r'_dim_(\d+)$', src).group(1))
+            for src in pred_cols if re.search(r'_dim_(\d+)$', src)
         )
         plot_dims = dims if dims is not None else found_dims
 
-        # per-dimension plots
+        # 3) per-dimension plotting
         for dim in plot_dims:
-            df_h = df_hist[df_hist['Source'].str.endswith(f'_dim_{dim}')]
-            df_t = df_true[df_true['Source'].str.endswith(f'_dim_{dim}')]
+            # subset to this dimension
+            sub = df_hist[df_hist['Source'].str.endswith(f'_dim_{dim}')]
+            tpl = df_true[df_true['Source'].str.endswith(f'_dim_{dim}')]
 
-            times = np.sort(df_h['Time'].unique())
+            # global bins for this dimension
+            all_states = sub['State'].values
+            if len(all_states) == 0:
+                continue
+            gmin, gmax = all_states.min(), all_states.max()
+            if np.isclose(gmin, gmax):
+                bins = np.array([gmin - 0.5, gmax + 0.5])
+            else:
+                bins = np.linspace(gmin, gmax, hist_bins + 1)
+
+            # time axis and truncation
+            times = np.sort(sub['Time'].unique())
             if max_time_steps is not None:
                 times = times[:max_time_steps]
-            df_h = df_h[df_h['Time'].isin(times)]
-            df_t = df_t[df_t['Time'].isin(times)]
 
-            # precompute for color mode
+            # adaptive half-width from actual time spacing
+            if len(times) > 1:
+                dt = np.min(np.diff(times))
+            else:
+                dt = 1.0
+            half_width = dt / 2.0
+
+            # filter to selected times
+            sub = sub[sub['Time'].isin(times)]
+            tpl = tpl[tpl['Time'].isin(times)]
+
+            # precompute global max mass for color mode
             if mode == 'color':
                 masses = []
                 for t in times[::hist_step]:
-                    vals = df_h.loc[df_h['Time'] == t, 'State'].values
-                    h, b = np.histogram(vals, bins=hist_bins, density=True)
-                    masses.extend(h * np.diff(b))
+                    vals = sub.loc[sub['Time'] == t, 'State'].values
+                    h, _ = np.histogram(vals, bins=bins, density=True)
+                    masses.extend(h * np.diff(bins))
                 global_max = max(masses) if masses else 1.0
 
             # start figure
             plt.figure(figsize=(12, 6))
 
-            # plot true‐state mean
-            true_mean = df_t.groupby('Time')['True'].mean()
+            # plot true-state mean
+            true_mean = tpl.groupby('Time')['True'].mean()
             plt.plot(
                 true_mean.index, true_mean.values,
                 label='True state', color='tab:gray', linewidth=1
             )
 
             # plot particle mean
-            pred_mean = df_h.groupby('Time')['State'].mean()
+            pred_mean = sub.groupby('Time')['State'].mean()
             plt.plot(
                 pred_mean.index, pred_mean.values,
-                label='Particle mean', color='red', linestyle='--', linewidth=1
+                label='Particle mean', color='red',
+                linestyle='--', linewidth=1
             )
 
-            # overlay spread if requested
+            # overlay spread unless mode='no'
             if mode != 'no':
                 for t in times[::hist_step]:
-                    vals = df_h.loc[df_h['Time'] == t, 'State'].values
-                    h, b = np.histogram(vals, bins=hist_bins, density=True)
-                    centers = 0.5 * (b[:-1] + b[1:])
+                    vals = sub.loc[sub['Time'] == t, 'State'].values
+                    h, _ = np.histogram(vals, bins=bins, density=True)
+                    centers = 0.5 * (bins[:-1] + bins[1:])
+                    hist_max = h.max() + 1e-12
 
                     if mode == 'width':
-                        scale = h.max() or 1.0
-                        widths = h / scale * 0.8
+                        widths = (h / hist_max) * 0.8
                         plt.fill_betweenx(
                             centers,
-                            t - widths, t + widths,
+                            t - widths * half_width,
+                            t + widths * half_width,
                             facecolor='orange', edgecolor='none', alpha=0.5
                         )
                     else:  # color
                         cmap = cm.get_cmap('Oranges')
-                        for mass, start, end in zip(h * np.diff(b), b[:-1], b[1:]):
+                        for mass, y0, y1 in zip(h * np.diff(bins), bins[:-1], bins[1:]):
+                            if mass <= 0:
+                                continue
                             intensity = 0.2 + 0.5 * (mass / global_max)
-                            color = cmap(intensity)
+                            col = cmap(intensity)
                             plt.fill_between(
-                                [t - 0.5, t + 0.5],
-                                [start, start],
-                                [end, end],
-                                color=color, linewidth=0
+                                [t - half_width, t + half_width],
+                                [y0, y0], [y1, y1],
+                                color=col, alpha=0.5, linewidth=0
                             )
 
             plt.xlabel('Time')
@@ -162,8 +185,8 @@ def plot_particle_trajectories_with_histograms(
             plt.tight_layout()
 
             if save_fig:
-                fname = f"{save_name}_{method_name}_dim_{dim}_{mode}.png"
-                plt.savefig(fname, dpi=150)
+                fn = f"{save_name}_{method_name}_dim_{dim}_{mode}.png"
+                plt.savefig(fn, dpi=150)
                 plt.close()
             else:
                 plt.show()
