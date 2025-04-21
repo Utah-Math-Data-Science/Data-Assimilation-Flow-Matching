@@ -1,7 +1,7 @@
 from typing import Any, List
 
 import omegaconf
-import hydra_orm
+import hydra_orm.utils
 from hydra_orm import orm
 import sqlalchemy as sa
 
