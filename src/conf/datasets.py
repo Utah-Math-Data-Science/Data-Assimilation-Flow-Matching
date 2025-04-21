@@ -4,7 +4,7 @@ from typing import List, Any
 from dataclasses import field
 
 import omegaconf
-import hydra_orm
+import hydra_orm.utils
 from hydra_orm import orm
 import sqlalchemy as sa
 
