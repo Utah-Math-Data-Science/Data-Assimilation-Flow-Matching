@@ -86,6 +86,17 @@ where:
 
          model/diffusion_path=VarianceExploding
 
+   * For the flow matching models, changing the guidance vector field approximation:
+
+      .. code:: bash
+
+         model/guidance=<guidance>
+
+      where ``<guidance>`` is one of:
+
+         * ``MonteCarlo``: the Monte Carlo approximation from section 3.2 of [Feng2025]_.
+         * ``Local``: the local approximation from section 3.3 of [Feng2025]_.
+
    * Using particle noise perturbation:
 
       .. code:: bash
@@ -131,3 +142,4 @@ References
 
 .. [Bao2024a] `F. Bao, Z. Zhang, and G. Zhang, "A score-based filter for nonlinear data assimilation," Journal of Computational Physics, vol. 514, p. 113207, Oct. 2024, doi: 10.1016/j.jcp.2024.113207. <https://www.sciencedirect.com/science/article/pii/S002199912400456X>`_
 .. [Bao2024b] `F. Bao, Z. Zhang, and G. Zhang, "An ensemble score filter for tracking high-dimensional nonlinear dynamical systems," Computer Methods in Applied Mechanics and Engineering, vol. 432, p. 117447, Dec. 2024, doi: 10.1016/j.cma.2024.117447. <https://www.sciencedirect.com/science/article/pii/S0045782524007023>`_
+.. [Feng2025] `R. Feng, T. Wu, C. Yu, W. Deng, and P. Hu, "On the Guidance of Flow Matching," Feb. 04, 2025, arXiv: arXiv:2502.02150. doi: 10.48550/arXiv.2502.02150. <http://arxiv.org/abs/2502.02150>`_
