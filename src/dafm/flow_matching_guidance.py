@@ -3,13 +3,14 @@ import torch.distributions
 from einops import rearrange, reduce
 
 from conf import flow_matching_guidance
+import dafm.diffusion_path
 
 
 class EnergyGuidance:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
+    def forward(self, x0, x1, t, xt, dot_xt_unguided, energy_function):
         raise NotImplementedError()
 
     def __call__(self, *args, **kwargs):
@@ -17,51 +18,59 @@ class EnergyGuidance:
 
 
 class No(EnergyGuidance):
-    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
+    def forward(self, x0, x1, t, xt, dot_xt_unguided, energy_function):
         return 0.
 
 
 class MonteCarlo(EnergyGuidance):
-    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
-        mean = x1 * t
-        std = 1 - t
-        noise_flowed_to_t = mean + x0 * std
+    def __init__(self, cfg, diffusion_path):
+        super().__init__(cfg)
+        self.diffusion_path = diffusion_path
+
+    def conditional_velocity(self, mean, dt_mean, std, dt_std, time, x):
+        return dt_std / std * (x - mean) + dt_mean
+
+    def forward(self, x0, x1, t, xt, dot_xt_unguided, energy_function):
+        monte_carlo_sample_count = x0.shape[0]
+        x0 = rearrange(x0, 'monte_carlo_sample_count dim -> monte_carlo_sample_count 1 dim')
+        x1 = rearrange(x1, 'monte_carlo_sample_count dim -> monte_carlo_sample_count 1 dim')
+        xt = rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
+
+        mean = self.diffusion_path.mean(t, x1)
+        std = self.diffusion_path.std(t, x1)
+        x0_flowed_to_t = mean + x0 * std
         # using Independent(Normal, 1) instead of MultivariateNormal is a trick
         # to specify the covariance matrix as scale * (identity matrix)
-        conditional_distribution = torch.distributions.Independent(
+        pt_xt_given_z = torch.distributions.Independent(
             # authors used scale=.1, saying that when scale is too small, many more samples are needed
-            torch.distributions.Normal(
-                loc=rearrange(noise_flowed_to_t, 'predicted_state_count dim -> predicted_state_count 1 dim'),
-                scale=(1 - t).clamp(min=self.cfg.time_min)
-            ),
+            torch.distributions.Normal(loc=x0_flowed_to_t, scale=std),
             1,
         )
         log_pt_xt_given_z = rearrange(
-            conditional_distribution.log_prob(
-                rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
-            ),
+            pt_xt_given_z.log_prob(xt),
             'monte_carlo_sample_count predicted_state_count -> monte_carlo_sample_count predicted_state_count 1',
         )
-        log_samples = torch.tensor(xt.shape[0], device=xt.device).log()
+        log_samples = torch.tensor(monte_carlo_sample_count, device=xt.device).log()
         log_pt_x = reduce(
             log_pt_xt_given_z,
-            'monte_carlo_sample_count predicted_state_count 1 -> predicted_state_count 1 1',
+            'monte_carlo_sample_count predicted_state_count 1 -> 1 predicted_state_count 1',
             torch.logsumexp,
         ) - log_samples
         neg_energy = rearrange(
-            -energy_function(x1),
-            'predicted_state_count 1 -> predicted_state_count 1 1',
+            -energy_function(rearrange(x1, 'monte_carlo_sample_count 1 dim -> monte_carlo_sample_count dim')),
+            'monte_carlo_sample_count 1 -> monte_carlo_sample_count 1 1',
         )
         Z = torch.exp(
             reduce(
                 neg_energy + log_pt_xt_given_z,
-                'monte_carlo_sample_count predicted_state_count 1 -> predicted_state_count 1 1',
+                'monte_carlo_sample_count predicted_state_count 1 -> 1 predicted_state_count 1',
                 torch.logsumexp,
             ) - log_samples - log_pt_x
         )
-        v_xt_given_z = rearrange(
-            x1 - x0,
-            'predicted_state_count dim -> predicted_state_count 1 dim',
+        v_xt_given_z = self.conditional_velocity(
+            mean, self.diffusion_path.dt_mean(t, x1),
+            std, self.diffusion_path.dt_std(t, x1),
+            t, xt
         )
         return reduce(
             (neg_energy.exp() / Z - 1)
@@ -77,7 +86,7 @@ class Local(EnergyGuidance):
         super().__init__(cfg)
         self.scheduler = scheduler
 
-    def forward(self, t, xt, x0, x1, dot_xt_unguided, energy_function):
+    def forward(self, x0, x1, t, xt, dot_xt_unguided, energy_function):
         x1_predicted = xt + (1 - t) * dot_xt_unguided
         with torch.enable_grad():
             x1_predicted.requires_grad_()
@@ -99,7 +108,11 @@ def get_guidance(cfg):
     if isinstance(cfg, flow_matching_guidance.No):
         return No(cfg)
     elif isinstance(cfg, flow_matching_guidance.MonteCarlo):
-        return MonteCarlo(cfg)
+        diffusion_path = dafm.diffusion_path.get_diffusion_path(
+            cfg.diffusion_path,
+            target_distribution_at_time_1=True  # always flow matching model
+        )
+        return MonteCarlo(cfg, diffusion_path)
     elif isinstance(cfg, flow_matching_guidance.Local):
         schedule = get_schedule(cfg.schedule)
         return Local(cfg, schedule)

@@ -415,7 +415,9 @@ class FlowMatching(Model):
             def velocity(t, x):
                 dot_state_unguided = forward(t, x)
                 return dot_state_unguided + guidance(
-                    t, x, noise, data, dot_state_unguided,
+                    noise, data,
+                    t, x,
+                    dot_state_unguided,
                     energy_function=lambda x1_predicted: reduce(
                         (observe(x1_predicted) - observation).square(),
                         'predicted_state_count dim -> predicted_state_count 1',
