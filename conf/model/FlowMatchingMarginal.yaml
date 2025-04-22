@@ -2,8 +2,6 @@ defaults:
   - _FlowMatchingMarginal
   - override diffusion_path: ConditionalOptimalTransport
   - override inflation_scale: NoScaling
-  - override guidance: Local
-  - override guidance/schedule: Constant
   - _self_
 
 epoch_count: 0

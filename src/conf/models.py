@@ -117,6 +117,12 @@ class FlowMatching(Trainable):
     guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)
 
     def __post_init__(self):
+        if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.MonteCarlo):
+            if not isinstance(self.guidance.diffusion_path, self.diffusion_path.__class__):
+                raise ValueError(
+                    f'model/guidance/diffusion_path ({self.guidance.diffusion_path.__class__.__name__}) is not an instance of model/diffusion_path ({self.diffusion_path.__class__.__name__}).'
+                    f' Please set model/guidance/diffusion_path={self.diffusion_path.__class__.__name__} so that the diffusion path of the guidance agrees with the diffusion path used by the flow matching model.'
+                )
         if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
             if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
                 raise ValueError(
@@ -147,6 +153,12 @@ class FlowMatchingMarginal(Trainable):
     guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)
 
     def __post_init__(self):
+        if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.MonteCarlo):
+            if not isinstance(self.guidance.diffusion_path, self.diffusion_path.__class__):
+                raise ValueError(
+                    f'The model/guidance/diffusion_path ({self.guidance.diffusion_path.__class__.__name__}) is not an instance of model/diffusion_path ({self.diffusion_path.__class__.__name__}).'
+                    f' Please set model/guidance/diffusion_path={self.diffusion_path.__class__.__name__} so that the diffusion path of the guidance agrees with the diffusion path used by the flow matching model.'
+                )
         if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
             if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
                 raise ValueError(
