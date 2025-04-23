@@ -14,15 +14,16 @@ def plot_particle_trajectories_with_histograms(
     save_name: str = 'example_fig'
 ):
     """
-    Plot particle spreads & means for each method in cfgs, using adaptive bar widths.
+    Plot particle spreads & means for each method in cfgs, using adaptive bar widths,
+    and overlay observation trajectories for observed dimensions.
 
     Parameters
     ----------
     cfgs : dict
-        Keys are typically tuples like ('...', method_name), values are dicts v
-        with v['trajectories']: a DataFrame indexed by time, columns including
-          - predicted_state_{i}_dim_{d}
-          - true_state_dim_{d} (or any non‑predicted column)
+        Keys are method identifiers, values are dicts with:
+          - 'cfg': configuration object with dataset.observe.n
+          - 'trajectories': DataFrame indexed by time, columns including
+            predicted_state_{i}_dim_{d}, true_state columns, and observation_dim_{k}
     dims : list[int], optional
         Which dims to plot; if None, infer from the first v.
     mode : {'width','color','no'}
@@ -55,6 +56,13 @@ def plot_particle_trajectories_with_histograms(
             method_name = key[1]
         else:
             method_name = str(key)
+
+        # prepare config and observation interval
+        cfg = v.get('cfg', None)
+        if cfg is not None and hasattr(cfg, 'dataset') and hasattr(cfg.dataset, 'observe'):
+            n_obs = getattr(cfg.dataset.observe, 'n', None)
+        else:
+            n_obs = None
 
         # prepare the trajectories DataFrame
         df = v['trajectories'].copy()
@@ -121,15 +129,6 @@ def plot_particle_trajectories_with_histograms(
             sub = sub[sub['Time'].isin(times)]
             tpl = tpl[tpl['Time'].isin(times)]
 
-            # precompute global max mass for color mode
-            if mode == 'color':
-                masses = []
-                for t in times[::hist_step]:
-                    vals = sub.loc[sub['Time'] == t, 'State'].values
-                    h, _ = np.histogram(vals, bins=bins, density=True)
-                    masses.extend(h * np.diff(bins))
-                global_max = max(masses) if masses else 1.0
-
             # start figure
             plt.figure(figsize=(12, 6))
 
@@ -137,7 +136,7 @@ def plot_particle_trajectories_with_histograms(
             true_mean = tpl.groupby('Time')['True'].mean()
             plt.plot(
                 true_mean.index, true_mean.values,
-                label='True state', color='tab:gray', linewidth=1
+                label='True state', color='tab:gray', linewidth=2
             )
 
             # plot particle mean
@@ -145,11 +144,33 @@ def plot_particle_trajectories_with_histograms(
             plt.plot(
                 pred_mean.index, pred_mean.values,
                 label='Particle mean', color='red',
-                linestyle='--', linewidth=1
+                linestyle='--', linewidth=2
             )
+
+            # plot observation if this dim is observed
+            if n_obs is not None and dim % n_obs == 0:
+                obs_idx = dim // n_obs
+                obs_col = f'observation_dim_{obs_idx}'
+                if obs_col in cols:
+                    df_obs = df[['Time', obs_col]].copy()
+                    df_obs = df_obs[df_obs['Time'].isin(times)]
+                    plt.plot(
+                        df_obs['Time'], df_obs[obs_col],
+                        label='Observation', color='blue',
+                        linewidth=0.5, marker='o', markersize=4
+                    )
 
             # overlay spread unless mode='no'
             if mode != 'no':
+                # precompute global max mass for color mode
+                if mode == 'color':
+                    masses = []
+                    for t in times[::hist_step]:
+                        vals = sub.loc[sub['Time'] == t, 'State'].values
+                        h, _ = np.histogram(vals, bins=bins, density=True)
+                        masses.extend(h * np.diff(bins))
+                    global_max = max(masses) if masses else 1.0
+
                 for t in times[::hist_step]:
                     vals = sub.loc[sub['Time'] == t, 'State'].values
                     h, _ = np.histogram(vals, bins=bins, density=True)
