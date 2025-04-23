@@ -71,10 +71,12 @@ where:
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``FlowMatchingMarginal``: Our flow matching filter that does **not** require training.
+   * ``FlowMatchingMarginal``: Our flow matching filter that approximates the flow matching vector field using a Monte Carlo approximation.
 
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``FlowMatchingLorenz96`` for ``Lorenz96Bao2024ML`` and ``Lorenz96H***``.
+
+   * ``FlowMatchingGaussianTarget``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
 
 * ``<other_overrides>...``: Other overrides for the model.
    Add the flag ``-c job`` to the Python command see what can be overridden from the command line.

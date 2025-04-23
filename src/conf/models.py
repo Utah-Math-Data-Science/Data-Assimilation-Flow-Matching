@@ -165,3 +165,53 @@ class FlowMatchingMarginal(Trainable):
                     'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
                     f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
                 )
+
+
+class FlowMatchingGaussianTarget(Model):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(diffusion_path=omegaconf.MISSING),
+        dict(inflation_scale=omegaconf.MISSING),
+        dict(guidance=omegaconf.MISSING),
+        '_self_',
+    ])
+    sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
+    sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.HEUN)
+
+    diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
+
+    guidance: flow_matching_guidance.EnergyGuidance = orm.OneToManyField(flow_matching_guidance.EnergyGuidance, default=omegaconf.MISSING)
+
+    def __post_init__(self):
+        if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.MonteCarlo):
+            if not isinstance(self.guidance.diffusion_path, self.diffusion_path.__class__):
+                raise ValueError(
+                    f'The model/guidance/diffusion_path ({self.guidance.diffusion_path.__class__.__name__}) is not an instance of model/diffusion_path ({self.diffusion_path.__class__.__name__}).'
+                    f' Please set model/guidance/diffusion_path={self.diffusion_path.__class__.__name__} so that the diffusion path of the guidance agrees with the diffusion path used by the flow matching model.'
+                )
+        if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
+            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+                raise ValueError(
+                    'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
+                    f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
+                )
+
+    @property
+    def epoch_count(self):
+        return 0
+
+    @property
+    def epoch_count_sampling(self):
+        return 0
+
+    @property
+    def train_on_initial_predicted_state(self):
+        return False
+
+    @property
+    def train_when_ignoring_observation(self):
+        return False
+
+    @property
+    def resample_predicted_state_when_ignoring_observation(self):
+        return False
+

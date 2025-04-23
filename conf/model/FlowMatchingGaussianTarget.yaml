@@ -1,0 +1,5 @@
+defaults:
+  - _FlowMatchingGaussianTarget
+  - override diffusion_path: ConditionalOptimalTransport
+  - override inflation_scale: NoScaling
+  - _self_

@@ -578,6 +578,57 @@ class FlowMatchingMarginal(nn.Module):
             yield done, time_step, time, xt
 
 
+class FlowMatchingGaussianTarget(nn.Module):
+    def __init__(self, cfg, diffusion_path, inflation_scale, guidance):
+        super().__init__()
+        self.cfg = cfg
+        self.diffusion_path = diffusion_path
+        self.inflation_scale = inflation_scale
+        self.guidance = guidance
+
+    def forward(self, time, x):
+        target_mean = reduce(x, 'predicted_state_count dim -> dim', 'mean')
+        target_covariance = torch.cov(x.T)
+
+        path_std = self.diffusion_path.std(time, target_mean)
+        dim = x.shape[1]
+        covariance = (
+            path_std**2 * torch.eye(dim, device=x.device)
+            + time**2 * target_covariance
+        )
+        dt_covariance = (
+            2 * path_std * self.diffusion_path.dt_std(time, target_mean)
+            + 2 * time * target_covariance
+        )
+
+        if dim <= 1:
+            dt_std_div_inv_std = 0.5 * covariance / dt_covariance
+            predicted_velocity = (
+                (x - self.diffusion_path.mean(time, target_mean)) * dt_std_div_inv_std
+                + self.diffusion_path.dt_mean(time, target_mean)
+            )
+        else:
+            dt_std_div_inv_std = 0.5 * torch.linalg.solve(covariance, dt_covariance, left=False)
+            predicted_velocity = (
+                (x - self.diffusion_path.mean(time, target_mean)) @ dt_std_div_inv_std.T
+                + self.diffusion_path.dt_mean(time, target_mean)
+            )
+
+        return predicted_velocity
+
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        for done, time_step, time, noise, xt in FlowMatching._sampling_steps(
+            self.cfg,
+            self.diffusion_path,
+            self,
+            self.guidance,
+            data, observation, observe,
+            time_step_count=time_step_count
+        ):
+            yield done, time_step, time, xt
+
+
 def get_model(cfg, state_dimension, observation_std):
     inflation_scale = dafm.inflation_scale.get_inflation_scale(cfg.inflation_scale)
     if isinstance(cfg, conf.models.ScoreMatching):
@@ -594,5 +645,9 @@ def get_model(cfg, state_dimension, observation_std):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
         return FlowMatchingMarginal(cfg, diffusion_path, inflation_scale, guidance)
+    elif isinstance(cfg, conf.models.FlowMatchingGaussianTarget):
+        diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
+        guidance = flow_matching_guidance.get_guidance(cfg.guidance)
+        return FlowMatchingGaussianTarget(cfg, diffusion_path, inflation_scale, guidance)
     else:
         raise ValueError(f'Unknown model: {cfg}')
