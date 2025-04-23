@@ -405,24 +405,25 @@ class FlowMatching(Model):
         return (1 - 2 * t).clamp(min=0)
 
     @classmethod
-    def _sampling_steps(cls, cfg, diffusion_path, forward, guidance, data, observation, observe, time_step_count=None):
+    def _sampling_steps(cls, cfg, diffusion_path, forward, guidance, observation_std, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or cfg.sampling_time_step_count
         path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
         noise = diffusion_path.sample_noise(path_time[0], data)
         if isinstance(cfg.guidance, flow_matching_guidance.No) or observation is None or cfg.ignore_observations:
             velocity = forward
         else:
+            inv_two_observation_var = 0.5 / observation_std**2
             def velocity(t, x):
                 dot_state_unguided = forward(t, x)
                 return dot_state_unguided + guidance(
                     noise, data,
                     t, x,
                     dot_state_unguided,
-                    energy_function=lambda x1_predicted: reduce(
+                    energy_function=lambda x1_predicted: inv_two_observation_var * reduce(
                         (observe(x1_predicted) - observation).square(),
                         'predicted_state_count dim -> predicted_state_count 1',
                         'sum'
-                    )
+                    ),
                 )
 
         xt = noise
@@ -470,6 +471,7 @@ class FlowMatching(Model):
             self.diffusion_path,
             self,
             self.guidance,
+            self.observation_std,
             current_states, observation, observe,
             time_step_count=time_step_count
         ):
@@ -477,9 +479,10 @@ class FlowMatching(Model):
 
 
 class FlowMatchingMarginal(nn.Module):
-    def __init__(self, cfg, diffusion_path, inflation_scale, guidance):
+    def __init__(self, cfg, observation_std, diffusion_path, inflation_scale, guidance):
         super().__init__()
         self.cfg = cfg
+        self.observation_std = observation_std
         self.diffusion_path = diffusion_path
         self.inflation_scale = inflation_scale
         self.guidance = guidance
@@ -545,6 +548,7 @@ class FlowMatchingMarginal(nn.Module):
             self.diffusion_path,
             self,
             self.guidance,
+            self.observation_std,
             data, observation, observe,
             time_step_count=time_step_count
         ):
@@ -579,9 +583,10 @@ class FlowMatchingMarginal(nn.Module):
 
 
 class FlowMatchingGaussianTarget(nn.Module):
-    def __init__(self, cfg, diffusion_path, inflation_scale, guidance):
+    def __init__(self, cfg, observation_std, diffusion_path, inflation_scale, guidance):
         super().__init__()
         self.cfg = cfg
+        self.observation_std = observation_std
         self.diffusion_path = diffusion_path
         self.inflation_scale = inflation_scale
         self.guidance = guidance
@@ -624,6 +629,7 @@ class FlowMatchingGaussianTarget(nn.Module):
             self.diffusion_path,
             self,
             self.guidance,
+            self.observation_std,
             data, observation, observe,
             time_step_count=time_step_count
         ):
@@ -645,10 +651,10 @@ def get_model(cfg, state_dimension, observation_std):
     elif isinstance(cfg, conf.models.FlowMatchingMarginal):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatchingMarginal(cfg, diffusion_path, inflation_scale, guidance)
+        return FlowMatchingMarginal(cfg, observation_std, diffusion_path, inflation_scale, guidance)
     elif isinstance(cfg, conf.models.FlowMatchingGaussianTarget):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatchingGaussianTarget(cfg, diffusion_path, inflation_scale, guidance)
+        return FlowMatchingGaussianTarget(cfg, observation_std, diffusion_path, inflation_scale, guidance)
     else:
         raise ValueError(f'Unknown model: {cfg}')
