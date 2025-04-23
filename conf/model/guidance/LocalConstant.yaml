@@ -1,0 +1,6 @@
+defaults:
+  - _Local
+  - override schedule: Constant
+
+schedule:
+  constant: 1.

@@ -3,3 +3,6 @@ defaults:
   - override diffusion_path: ConditionalOptimalTransport
   - override inflation_scale: NoScaling
   - _self_
+
+diffusion_path:
+  sigma_min: 1e-2

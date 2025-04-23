@@ -1,6 +1,5 @@
 defaults:
   - _ScoreMatching
-  - override diffusion_path: VarianceExploding
   - override inflation_scale: NoScaling
   - _self_
 
