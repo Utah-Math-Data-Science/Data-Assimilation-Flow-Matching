@@ -597,7 +597,7 @@ class FlowMatchingGaussianTarget(nn.Module):
             + time**2 * target_covariance
         )
         dt_covariance = (
-            2 * path_std * self.diffusion_path.dt_std(time, target_mean)
+            2 * path_std * self.diffusion_path.dt_std(time, target_mean) * torch.eye(dim, device=x.device)
             + 2 * time * target_covariance
         )
 
