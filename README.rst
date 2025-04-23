@@ -71,12 +71,13 @@ where:
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``FlowMatchingMarginal``: Our flow matching filter that approximates the flow matching vector field using a Monte Carlo approximation.
+   * ``FlowMatchingMarginal*``: Our flow matching filter that approximates the flow matching vector field using a Monte Carlo approximation.
 
-      * The default parameters are for ``dataset=DoubleWell``.
-        Use ``FlowMatchingLorenz96`` for ``Lorenz96Bao2024ML`` and ``Lorenz96H***``.
+      * Variants available: ``FlowMatchingMarginalConditionalOptimalTransport``
 
-   * ``FlowMatchingGaussianTarget``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
+   * ``FlowMatchingGaussianTarget*``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
+
+      * Variants available: ``FlowMatchingGaussianTargetConditionalOptimalTransport``
 
 * ``<other_overrides>...``: Other overrides for the model.
    Add the flag ``-c job`` to the Python command see what can be overridden from the command line.
@@ -96,8 +97,10 @@ where:
 
       where ``<guidance>`` is one of:
 
-         * ``MonteCarlo``: the Monte Carlo approximation from section 3.2 of [Feng2025]_.
-         * ``Local``: the local approximation from section 3.3 of [Feng2025]_.
+         * ``MonteCarlo*``: the Monte Carlo approximation from section 3.2 of [Feng2025]_.
+            * Variants available: ``MonteCarloTargetConditionalOptimalTransport``
+         * ``Local*``: the local approximation from section 3.3 of [Feng2025]_.
+            * Variants available: ``LocalConstant``
 
    * Using particle noise perturbation:
 
