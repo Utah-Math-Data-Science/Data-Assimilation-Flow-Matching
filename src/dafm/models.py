@@ -56,11 +56,11 @@ class ResidualBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, cfg, state_dimension, observation_std, diffusion_path, inflation_scale):
+    def __init__(self, cfg, state_dimension, observation_noise_std, diffusion_path, inflation_scale):
         super().__init__()
         self.cfg = cfg
         self.state_dimension = state_dimension
-        self.observation_std = observation_std
+        self.observation_noise_std = observation_noise_std
         self.diffusion_path = diffusion_path
         self.inflation_scale = inflation_scale
         if cfg.embedding_dimension % 2 != 0:
@@ -124,7 +124,7 @@ class ScoreMatching(Model):
         return (1 - 2 * t).clamp(min=0)
 
     @classmethod
-    def _sampling_steps(cls, cfg, diffusion_path, forward, observation_std, observation_likelihood_score_damping, data, observation, observe, time_step_count=None):
+    def _sampling_steps(cls, cfg, diffusion_path, forward, observation_noise_std, observation_likelihood_score_damping, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or cfg.sampling_time_step_count
         path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
         minus_time_step_size = path_time[1] - path_time[0]
@@ -142,7 +142,7 @@ class ScoreMatching(Model):
                 with torch.enable_grad():
                     xt_grad = xt.detach().requires_grad_()
                     observation_likelihood_distribution = torch.distributions.Independent(
-                        torch.distributions.Normal(observation, observation_std),
+                        torch.distributions.Normal(observation, observation_noise_std),
                         1,
                     )
                     log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(xt_grad))
@@ -183,7 +183,7 @@ class ScoreMatching(Model):
             self.cfg,
             self.diffusion_path,
             self,
-            self.observation_std,
+            self.observation_noise_std,
             self.observation_likelihood_score_damping,
             current_states, observation, observe,
             time_step_count=time_step_count,
@@ -192,10 +192,10 @@ class ScoreMatching(Model):
 
 
 class ScoreMatchingMarginal(nn.Module):
-    def __init__(self, cfg, observation_std, diffusion_path, inflation_scale):
+    def __init__(self, cfg, observation_noise_std, diffusion_path, inflation_scale):
         super().__init__()
         self.cfg = cfg
-        self.observation_std = observation_std
+        self.observation_noise_std = observation_noise_std
         self.diffusion_path = diffusion_path
         self.inflation_scale = inflation_scale
 
@@ -233,7 +233,7 @@ class ScoreMatchingMarginal(nn.Module):
             self.cfg,
             self.diffusion_path,
             self,
-            self.observation_std,
+            self.observation_noise_std,
             self.observation_likelihood_score_damping,
             data, observation, observe,
             time_step_count=time_step_count,
@@ -267,8 +267,8 @@ class ScoreMatchingMarginal(nn.Module):
 
 
 class FlowMatching(Model):
-    def __init__(self, cfg, state_dimension, observation_std, diffusion_path, inflation_scale, guidance):
-        super().__init__(cfg, state_dimension, observation_std, diffusion_path, inflation_scale)
+    def __init__(self, cfg, state_dimension, observation_noise_std, diffusion_path, inflation_scale, guidance):
+        super().__init__(cfg, state_dimension, observation_noise_std, diffusion_path, inflation_scale)
         self.guidance = guidance
 
     def forward(self, time, state):
@@ -381,7 +381,7 @@ class FlowMatching(Model):
             weighting = 1 / predicted_state_count
         else:
             observation_likelihood_distribution = torch.distributions.Independent(
-                torch.distributions.Normal(observe(state), self.observation_std),
+                torch.distributions.Normal(observe(state), self.observation_noise_std),
                 1,
             )
             log_observation_likelihood = rearrange(
@@ -405,25 +405,34 @@ class FlowMatching(Model):
         return (1 - 2 * t).clamp(min=0)
 
     @classmethod
-    def _sampling_steps(cls, cfg, diffusion_path, forward, guidance, observation_std, data, observation, observe, time_step_count=None):
+    def _sampling_steps(cls, cfg, diffusion_path, forward, guidance, observation_noise_std, data, observation, observe, time_step_count=None):
         time_step_count = time_step_count or cfg.sampling_time_step_count
         path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
         noise = diffusion_path.sample_noise(path_time[0], data)
         if isinstance(cfg.guidance, flow_matching_guidance.No) or observation is None or cfg.ignore_observations:
             velocity = forward
         else:
-            inv_two_observation_var = 0.5 / observation_std**2
+            observation_likelihood_distribution = torch.distributions.Independent(
+                torch.distributions.Normal(observation, observation_noise_std),
+                1,
+            )
+            # log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(x1_predicted))
+            # inv_two_observation_var = 0.5 / observation_noise_std**2
             def velocity(t, x):
                 dot_state_unguided = forward(t, x)
                 return dot_state_unguided + guidance(
                     noise, data,
                     t, x,
                     dot_state_unguided,
-                    energy_function=lambda x1_predicted: inv_two_observation_var * reduce(
-                        (observe(x1_predicted) - observation).square(),
-                        'predicted_state_count dim -> predicted_state_count 1',
-                        'sum'
-                    ),
+                    energy_function=lambda x1_predicted: rearrange(
+                        -observation_likelihood_distribution.log_prob(observe(x1_predicted)),
+                        'predicted_state_count -> predicted_state_count 1',
+                    )
+                    # energy_function=lambda x1_predicted: inv_two_observation_var * reduce(
+                    #     (observe(x1_predicted) - observation).square(),
+                    #     'predicted_state_count dim -> predicted_state_count 1',
+                    #     'sum'
+                    # ),
                 )
 
         xt = noise
@@ -471,7 +480,7 @@ class FlowMatching(Model):
             self.diffusion_path,
             self,
             self.guidance,
-            self.observation_std,
+            self.observation_noise_std,
             current_states, observation, observe,
             time_step_count=time_step_count
         ):
@@ -479,10 +488,10 @@ class FlowMatching(Model):
 
 
 class FlowMatchingMarginal(nn.Module):
-    def __init__(self, cfg, observation_std, diffusion_path, inflation_scale, guidance):
+    def __init__(self, cfg, observation_noise_std, diffusion_path, inflation_scale, guidance):
         super().__init__()
         self.cfg = cfg
-        self.observation_std = observation_std
+        self.observation_noise_std = observation_noise_std
         self.diffusion_path = diffusion_path
         self.inflation_scale = inflation_scale
         self.guidance = guidance
@@ -548,7 +557,7 @@ class FlowMatchingMarginal(nn.Module):
             self.diffusion_path,
             self,
             self.guidance,
-            self.observation_std,
+            self.observation_noise_std,
             data, observation, observe,
             time_step_count=time_step_count
         ):
@@ -583,10 +592,10 @@ class FlowMatchingMarginal(nn.Module):
 
 
 class FlowMatchingGaussianTarget(nn.Module):
-    def __init__(self, cfg, observation_std, diffusion_path, inflation_scale, guidance):
+    def __init__(self, cfg, observation_noise_std, diffusion_path, inflation_scale, guidance):
         super().__init__()
         self.cfg = cfg
-        self.observation_std = observation_std
+        self.observation_noise_std = observation_noise_std
         self.diffusion_path = diffusion_path
         self.inflation_scale = inflation_scale
         self.guidance = guidance
@@ -629,32 +638,32 @@ class FlowMatchingGaussianTarget(nn.Module):
             self.diffusion_path,
             self,
             self.guidance,
-            self.observation_std,
+            self.observation_noise_std,
             data, observation, observe,
             time_step_count=time_step_count
         ):
             yield done, time_step, time, xt
 
 
-def get_model(cfg, state_dimension, observation_std):
+def get_model(cfg, state_dimension, observation_noise_std):
     inflation_scale = dafm.inflation_scale.get_inflation_scale(cfg.inflation_scale)
     if isinstance(cfg, conf.models.ScoreMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
-        return ScoreMatching(cfg, state_dimension, observation_std, diffusion_path, inflation_scale)
+        return ScoreMatching(cfg, state_dimension, observation_noise_std, diffusion_path, inflation_scale)
     elif isinstance(cfg, conf.models.ScoreMatchingMarginal):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
-        return ScoreMatchingMarginal(cfg, observation_std, diffusion_path, inflation_scale)
+        return ScoreMatchingMarginal(cfg, observation_noise_std, diffusion_path, inflation_scale)
     elif isinstance(cfg, conf.models.FlowMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatching(cfg, state_dimension, observation_std, diffusion_path, inflation_scale, guidance)
+        return FlowMatching(cfg, state_dimension, observation_noise_std, diffusion_path, inflation_scale, guidance)
     elif isinstance(cfg, conf.models.FlowMatchingMarginal):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatchingMarginal(cfg, observation_std, diffusion_path, inflation_scale, guidance)
+        return FlowMatchingMarginal(cfg, observation_noise_std, diffusion_path, inflation_scale, guidance)
     elif isinstance(cfg, conf.models.FlowMatchingGaussianTarget):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
-        return FlowMatchingGaussianTarget(cfg, observation_std, diffusion_path, inflation_scale, guidance)
+        return FlowMatchingGaussianTarget(cfg, observation_noise_std, diffusion_path, inflation_scale, guidance)
     else:
         raise ValueError(f'Unknown model: {cfg}')

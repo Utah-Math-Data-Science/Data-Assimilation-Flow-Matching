@@ -30,11 +30,11 @@ class Dataset(orm.InheritableTable):
     ])
     state_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
 
-    model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
-    observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+    model_noise_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+    observation_noise_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
     predicted_state_initial_condition_add_true_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     predicted_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
-    predicted_state_model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=II('.model_std'))
+    predicted_state_model_noise_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=II('.model_noise_std'))
 
     predicted_state_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
 

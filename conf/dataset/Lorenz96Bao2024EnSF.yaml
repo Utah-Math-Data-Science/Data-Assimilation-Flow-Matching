@@ -5,7 +5,7 @@ defaults:
 
 state_dimension: 1e6
 
-observation_std: .05
+observation_noise_std: .05
 predicted_state_initial_condition_add_true_state: false
 predicted_state_initial_condition_std: 1.
 

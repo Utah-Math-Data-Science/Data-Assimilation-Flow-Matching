@@ -2,10 +2,10 @@ defaults:
   - _DoubleWell
   - _self_
 
-model_std: 0.2
-observation_std: 0.1
+model_noise_std: 0.2
+observation_noise_std: 0.1
 predicted_state_initial_condition_std: 0.2
-predicted_state_model_std: 1.
+predicted_state_model_noise_std: 1.
 
 predicted_state_count: 1000
 

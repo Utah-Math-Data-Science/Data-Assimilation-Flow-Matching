@@ -32,9 +32,9 @@ class Dataset:
         self.data['true_state'].append(self.initialize_true_state(cfg, device))
 
         predicted_state_initial_condition_noise = torch.randn((cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
-        true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.data['true_state'][0].shape), device=device) * cfg.model_std
-        observation_noise = torch.randn((self.data['times'].shape[0], *self.observe(self.data['true_state'][0]).shape), device=device) * cfg.observation_std
-        self.predicted_state_noise = torch.randn((self.data['times'][:-1].shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_std
+        true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.data['true_state'][0].shape), device=device) * cfg.model_noise_std
+        observation_noise = torch.randn((self.data['times'].shape[0], *self.observe(self.data['true_state'][0]).shape), device=device) * cfg.observation_noise_std
+        self.predicted_state_noise = torch.randn((self.data['times'][:-1].shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_noise_std
 
         for time_step, t_now_and_next in enumerate(times_from_zero.unfold(0, 2, 1)):
             true_state = self.data['true_state'][-1]
@@ -70,10 +70,10 @@ class Dataset:
 
     def _step_state(self, time_step, t_now_and_next, state, model_noise):
         if self.cfg.integrator is conf.datasets.Integrator.RUNGE_KUTTA_4:
-            if self.cfg.model_std > 0 or self.cfg.predicted_state_model_std > 0:
+            if self.cfg.model_noise_std > 0 or self.cfg.predicted_state_model_noise_std > 0:
                 raise ValueError(
                     f'{self.cfg.integrator.name} is not a stochastic differential equation integrator.'
-                    'Please choose a different integrator (e.g., set dataset.integrator=EULER_MARUYAMA) or set dataset.model_std=0 and dataset.predicted_state_model_std=0.'
+                    'Please choose a different integrator (e.g., set dataset.integrator=EULER_MARUYAMA) or set dataset.model_noise_std=0 and dataset.predicted_state_model_noise_std=0.'
                 )
             next_state = odeint(
                 self.dynamics, state, rearrange(t_now_and_next, '1 times -> times'),
