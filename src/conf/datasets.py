@@ -37,6 +37,15 @@ class Dataset(orm.InheritableTable):
     state_perturbation: StatePerturbation = orm.make_field(orm.ColumnRequired(sa.Enum(StatePerturbation)), default=StatePerturbation.IDENTITY)
 
 
+class Simple(Dataset):
+    state_dimension: int = field(default=1)
+    model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.0)
+    observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.0)
+    true_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+    predicted_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+    predicted_state_model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+
+
 class DoubleWell(Dataset):
     state_dimension: int = field(default=1)
     model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.2)

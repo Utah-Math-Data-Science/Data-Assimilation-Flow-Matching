@@ -136,6 +136,15 @@ class Lorenz96(Dataset):
         return (x_p1 - x_m2) * x_m1 - x + self.cfg.forcing
 
 
+class Simple(Dataset):
+    def initialize_true_state(self, cfg, device):
+        true_state = torch.zeros((1, self.cfg.state_dimension), device=device)
+        return true_state
+
+    def dynamics(self, t, x):
+        return 1
+
+
 class PredictedStatesAndObservation(IterableDataset):
     def __init__(self, dataset, model):
         self.dataset = dataset
@@ -215,5 +224,7 @@ def get_dynamics_dataset(cfg, device):
         return Lorenz63(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.Lorenz96):
         return Lorenz96(cfg, observe, state_perturbation, device)
+    elif isinstance(cfg, conf.datasets.Simple):
+        return Simple(cfg, observe, state_perturbation, device)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

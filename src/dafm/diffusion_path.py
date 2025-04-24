@@ -254,6 +254,9 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
     def beta(self, t):
         return (self.cfg.epsilon_beta + t * (1 - self.cfg.epsilon_beta))**(1/2)
 
+    def dt_squared_beta(self, t):
+        return 1 - self.cfg.epsilon_beta
+
     def mean(self, t, data):
         """
         The mean of the Gaussian conditional probability path.
@@ -306,8 +309,7 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
     def g(self, t):
         if self.target_distribution_at_time_1:
             raise NotImplementedError()
-        dt_squared_beta = 1 - self.cfg.epsilon_beta
-        return (dt_squared_beta - 2 * self.dt_log_alpha(t) * self.beta(t).square()).sqrt()
+        return (self.dt_squared_beta(t) - 2 * self.dt_log_alpha(t) * self.beta(t).square()).sqrt()
 
     def sample_noise(self, t, data):
         """
