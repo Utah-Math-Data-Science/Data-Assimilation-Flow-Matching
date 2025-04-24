@@ -3,7 +3,7 @@ defaults:
   - override observe: ATan
   - _self_
 
-state_dimension: 1e6
+state_dimension: 1_000_000
 
 observation_noise_std: .05
 predicted_state_initial_condition_add_true_state: false
