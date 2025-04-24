@@ -3,18 +3,20 @@ defaults:
   - override observe: ATan
   - _self_
 
+state_dimension: 1e6
 
-predicted_state_count: 20
-time_step_count: 1800
-time_step_count_drop_first: 1000
-model_std: 0.
-predicted_state_model_std: 0.
-true_state_initial_condition_mean: 0.
-true_state_initial_condition_std: 3.
+observation_std: .05
 predicted_state_initial_condition_add_true_state: false
 predicted_state_initial_condition_std: 1.
-integrator: RUNGE_KUTTA_4
+
+predicted_state_count: 20
+
+time_step_count: 1800
+time_step_count_drop_first: 1000
 time_step_size: .01
+
 observe_every_n_time_steps: 10
-observation_std: .05
-state_dimension: 10
+
+integrator: RUNGE_KUTTA_4
+
+true_state_initial_condition_std: 3.

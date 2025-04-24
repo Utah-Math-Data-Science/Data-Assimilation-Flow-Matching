@@ -3,14 +3,17 @@ defaults:
   - _self_
 
 state_dimension: 10
+
+observation_std: 1.
+predicted_state_initial_condition_std: .1
+
 predicted_state_count: 500
+
 time_step_count: 1100
 time_step_count_drop_first: 1000
 time_step_size: .03
+
+integrator: RUNGE_KUTTA_4
+
 true_state_initial_condition_mean: 5.
 true_state_initial_condition_std: 1.
-predicted_state_initial_condition_std: .1
-integrator: RUNGE_KUTTA_4
-model_std: 0.
-observation_std: 1.
-predicted_state_model_std: 0.
