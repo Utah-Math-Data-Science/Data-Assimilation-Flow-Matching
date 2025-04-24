@@ -1,4 +1,3 @@
-from dataclasses import field
 import enum
 from typing import List, Any
 
@@ -17,6 +16,12 @@ class Model(orm.InheritableTable):
         dict(inflation_scale=omegaconf.MISSING),
         '_self_',
     ])
+    epoch_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=0)
+    epoch_count_sampling: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=0)
+    train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    train_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+
     ignore_observations: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     resample_predicted_state_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     inflation_scale = orm.OneToManyField(inflation.InflationScale, default=omegaconf.MISSING)
@@ -29,20 +34,11 @@ class Model(orm.InheritableTable):
 
 
 class Trainable(Model):
-    epoch_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
-    epoch_count_sampling: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=0)
     batch_size: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1000)
     shuffle_training_samples: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
 
-    embedding_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=50)
-    residual_block_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=2)
-    use_batch_norm: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
-
-    train_on_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     learning_rate_when_training_on_initial_predicted_state: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5e-3)
     learning_rate: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-2)
-    resample_initial_predicted_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
-    train_when_ignoring_observation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class Sampler(enum.Enum):
@@ -57,10 +53,13 @@ class ScoreMatching(Trainable):
         dict(inflation_scale=omegaconf.MISSING),
         '_self_',
     ])
+    embedding_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=50)
+    residual_block_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=2)
+    use_batch_norm: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
-    sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
+    sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
@@ -78,10 +77,9 @@ class ScoreMatchingMarginal(Trainable):
         dict(inflation_scale=omegaconf.MISSING),
         '_self_',
     ])
-
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
-    sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
+    sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
@@ -102,6 +100,9 @@ class FlowMatching(Trainable):
         dict(guidance=omegaconf.MISSING),
         '_self_',
     ])
+    embedding_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=50)
+    residual_block_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=2)
+    use_batch_norm: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.HEUN)
@@ -194,24 +195,3 @@ class FlowMatchingGaussianTarget(Model):
                     'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
                     f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
                 )
-
-    @property
-    def epoch_count(self):
-        return 0
-
-    @property
-    def epoch_count_sampling(self):
-        return 0
-
-    @property
-    def train_on_initial_predicted_state(self):
-        return False
-
-    @property
-    def train_when_ignoring_observation(self):
-        return False
-
-    @property
-    def resample_predicted_state_when_ignoring_observation(self):
-        return False
-

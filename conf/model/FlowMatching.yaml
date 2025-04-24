@@ -5,4 +5,7 @@ defaults:
   - override guidance: 'No'
   - _self_
 
+epoch_count: 600
+train_on_initial_predicted_state: true
+
 batch_size: ${oc.select:..dataset.predicted_state_count,1}

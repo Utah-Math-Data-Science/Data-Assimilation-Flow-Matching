@@ -64,7 +64,7 @@ def test_conditional_optimal_transport_target_distribution_at_time_1(engine):
 
 
 def test_bao_2024_ensemble_score_matching(engine):
-    cfg = init_hydra_cfg('conf', ['dataset=DoubleWell', 'model=ScoreMatchingMarginal'])
+    cfg = init_hydra_cfg('conf', ['dataset=DoubleWell', 'model=ScoreMatchingMarginalBao2024EnSF'])
     conf.orm.create_all(engine)
     with conf.sa.orm.Session(engine) as db:
         cfg = conf.orm.instantiate_and_insert_config(db, cfg)

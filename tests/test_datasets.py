@@ -15,7 +15,7 @@ def test_simple_dataset(engine, observe_every_n_time_steps):
     cfg = init_hydra_cfg('conf', [
         'dataset=_Simple',
         f'dataset.observe_every_n_time_steps={observe_every_n_time_steps}',
-        'model=ScoreMatchingMarginal',
+        'model=ScoreMatchingMarginalBao2024EnSF',
         'model.epoch_count=1',
         'model.epoch_count_sampling=0',
         'model.sampling_time_step_count=2',

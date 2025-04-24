@@ -65,7 +65,10 @@ where:
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``ScoreMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``ScoreMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``ScoreMatchingMarginal``: The score matching filter described in [Bao2024b]_.
+   * ``ScoreMatchingMarginal*``: The score matching filter described in [Bao2024b]_.
+
+      * Variants available: ``ScoreMatchingMarginalBao2024EnSF``
+
    * ``FlowMatching``: Our flow matching filter that requires training.
 
       * The default parameters are for ``dataset=DoubleWell``.

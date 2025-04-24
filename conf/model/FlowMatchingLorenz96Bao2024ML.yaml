@@ -3,6 +3,8 @@ defaults:
   - _self_
 
 epoch_count: 1000
+train_on_initial_predicted_state: true
+
 learning_rate_when_training_on_initial_predicted_state: 1e-2
 learning_rate: 1e-3
 
