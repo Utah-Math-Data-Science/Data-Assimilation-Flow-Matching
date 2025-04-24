@@ -8,3 +8,7 @@ epoch_count: 0
 train_on_initial_predicted_state: false
 particle_count: ${oc.select:..dataset.predicted_state_count,1}
 sampling_max_score_norm: 1e3
+sampling_time_step_count: 500
+diffusion_path:
+  sample_noise_add_mean: false
+  sample_noise_scale_std: false

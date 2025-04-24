@@ -53,6 +53,7 @@ orm.store_config(datasets.Lorenz96, group=Conf.dataset.key, name=f'_{datasets.Lo
 orm.store_config(observe.Full, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(observe.EveryNthDimension, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(observe.Exponentiate, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
+orm.store_config(observe.ATan, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(models.ScoreMatching, group=Conf.model.key, name=f'_{models.ScoreMatching.__name__}')
 orm.store_config(models.ScoreMatchingMarginal, group=Conf.model.key, name=f'_{models.ScoreMatchingMarginal.__name__}')
 orm.store_config(flow_matching_guidance.No, group=f'{Conf.model.key}/{models.FlowMatching.guidance.key}')

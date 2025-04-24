@@ -49,9 +49,11 @@ class Dataset:
         )
 
         self.data['true_state'] = self.data['true_state'][times_to_keep]
-        self.data['predicted_state'].append(
-            self.data['true_state'][0] + predicted_state_initial_condition_noise
-        )
+
+        predicted_state_initial_condition = predicted_state_initial_condition_noise
+        if cfg.predicted_state_initial_condition_add_true_state:
+            predicted_state_initial_condition += self.data['true_state'][0]
+        self.data['predicted_state'].append(predicted_state_initial_condition)
 
         self.data['observation'] = self.observe(self.data['true_state']) + observation_noise
 

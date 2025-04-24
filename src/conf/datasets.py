@@ -74,6 +74,7 @@ class Lorenz96(Dataset):
     observation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.5)
     true_state_initial_condition_mean: float = orm.make_field(orm.ColumnRequired(sa.Double), default=4.)
     true_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=2.)
+    predicted_state_initial_condition_add_true_state: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     predicted_state_initial_condition_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.5)
     predicted_state_model_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)
 

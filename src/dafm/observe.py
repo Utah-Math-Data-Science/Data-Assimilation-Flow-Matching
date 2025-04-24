@@ -39,6 +39,11 @@ class Exponentiate(Observe):
         return state**self.cfg.exponent
 
 
+class ATan(Observe):
+    def forward(self, state):
+        return state.atan()
+
+
 def get_observe(cfg):
     if isinstance(cfg.observe, conf.observe.Full):
         return Full(cfg.observe, cfg)
@@ -46,5 +51,7 @@ def get_observe(cfg):
         return EveryNthDimension(cfg.observe, cfg)
     elif isinstance(cfg.observe, conf.observe.Exponentiate):
         return Exponentiate(cfg.observe, cfg)
+    elif isinstance(cfg.observe, conf.observe.ATan):
+        return ATan(cfg.observe, cfg)
     else:
         raise ValueError(f'Unknown observe: {cfg.observe}')

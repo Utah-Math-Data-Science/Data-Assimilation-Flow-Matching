@@ -17,3 +17,7 @@ class EveryNthDimension(Observe):
 
 class Exponentiate(Observe):
     exponent: float = orm.make_field(orm.ColumnRequired(sa.Double), default=3.)
+
+
+class ATan(Observe):
+    pass
