@@ -61,3 +61,32 @@ def test_conditional_optimal_transport_target_distribution_at_time_1(engine):
     assert path.dt_mean(t_noise, data) == data
     assert path.std(t_data, data) < path.std(t_noise, data)
     assert path.dt_std(t_data, data) == path.dt_std(t_noise, data)
+
+
+def test_bao_2024_ensemble_score_matching(engine):
+    cfg = init_hydra_cfg('conf', ['dataset=DoubleWell', 'model=ScoreMatchingMarginal'])
+    conf.orm.create_all(engine)
+    with conf.sa.orm.Session(engine) as db:
+        cfg = conf.orm.instantiate_and_insert_config(db, cfg)
+        path = diffusion_path.get_diffusion_path(cfg.model.diffusion_path, target_distribution_at_time_1=True)
+
+    data = torch.tensor(1.)
+    t_noise = torch.tensor(0.)
+    t_data = torch.tensor(1.)
+    assert path.alpha(0) == 1.
+    assert path.alpha(1) == cfg.model.diffusion_path.epsilon_alpha
+    assert path.beta(0)**2 == cfg.model.diffusion_path.epsilon_beta
+    assert path.beta(1)**2 == 1.
+    with torch.enable_grad():
+        for t in (t_noise, t_data, (t_noise + t_data) / 2):
+            t = t.clone().requires_grad_()
+            dt_log_alpha, *_ = torch.autograd.grad(
+                outputs=path.alpha(t).log(),
+                inputs=t,
+            )
+            assert dt_log_alpha == path.dt_log_alpha(t)
+            dt_squared_beta, *_ = torch.autograd.grad(
+                outputs=path.beta(t).square(),
+                inputs=t,
+            )
+            assert dt_squared_beta == path.dt_squared_beta(t)
