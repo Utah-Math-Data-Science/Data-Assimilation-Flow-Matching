@@ -117,6 +117,23 @@ where:
 
          model/inflation_scale=ConstantScale model.inflation_scale.constant=1.01
 
+Running data ssimilation experiments with high-dimensional systems
+==================================================================
+
+By default, the true system state and observation trajectories are computed to the terminal time and stored on the specified device (see ``Conf.device`` in ``src/conf/conf.py``);
+however, for high-dimensional systems, this can require more RAM than is available when the ``Conf.device == 'cuda'``.
+To work around this, we introduce the configuration setting in ``Dataset.trajectory_stored_on_gpu_max_state_dimension`` in ``src/conf/datsets.py``.
+When ``Dataset.state_dimension > Dataset.trajectory_stored_on_gpu_max_state_dimension``, we store these trajectories as if ``Conf.device == 'cpu'``, then move the PyTorch tensors to ``Conf.device == 'cuda'`` when necessary (e.g., when sampling from a generative model).
+
+Also, by default, all the particle states are saved to a `.parquet` file once the experiment is complete.
+For high-dimensional systems, this can be many gigabytes of data.
+Use ``Dataset.save_only_mean_std`` to save the mean and standard deviation of the particles for each time step and dimension.
+
+.. warning::
+
+   Due to a bug in ``hydra-orm``, the configuration settings mentiond here must be edited in their respective Python files.
+   Command line overrides for these settings will be ignored.
+
 Running data assimilation experiments in parallel
 =================================================
 

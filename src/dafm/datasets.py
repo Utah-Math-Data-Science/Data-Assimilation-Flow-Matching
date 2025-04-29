@@ -24,6 +24,9 @@ class Dataset:
         self.cfg = cfg
         self.observe = observe
         self.device = device
+        self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
+        if self.store_trajectory_on_cpu:
+            device = 'cpu'
 
         self.data = defaultdict(list)
         time_step_indices, times_from_zero = self.time_steps_and_times(cfg, device)
@@ -157,11 +160,17 @@ class PredictedStatesAndObservation(IterableDataset):
         if self.model.cfg.train_on_initial_predicted_state:
             time_step, t_now_and_next, predicted_state, next_observation, _ = next(iter(self.dataset))
             self.time_step = time_step
+            t_now_and_next, predicted_state, next_observation = map(
+                lambda x: x.to(self.dataset.device),
+                (t_now_and_next, predicted_state, next_observation)
+            )
             yield self.model.cfg.epoch_count, time_step, t_now_and_next, predicted_state, next_observation, True
             if self.model.cfg.resample_initial_predicted_state:
                 for done, sample_time_step, sample_time, sampled_state in self.model.sampling_steps(predicted_state, next_observation, self.dataset.observe):
                     if self.model.cfg.epoch_count_sampling > 0 and not done:
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_time, sampled_state, next_observation, True
+                if self.dataset.store_trajectory_on_cpu:
+                    sampled_state = sampled_state.to('cpu')
                 self.dataset.data['predicted_state'][0] = sampled_state
         for time_step, t_now_and_next, predicted_state, next_observation, ignore_observation in tqdm(
            self.dataset,
@@ -171,6 +180,10 @@ class PredictedStatesAndObservation(IterableDataset):
         ):
             self.time_step = time_step
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
+            t_now_and_next, next_predicted_state, next_observation = map(
+                lambda x: x.to(self.dataset.device),
+                (t_now_and_next, next_predicted_state, next_observation)
+            )
             if self.model.cfg.epoch_count > 0 and (not ignore_observation or self.model.cfg.train_when_ignoring_observation):
                 yield self.model.cfg.epoch_count, time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
             if not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation:
@@ -195,6 +208,8 @@ class PredictedStatesAndObservation(IterableDataset):
                 sampled_state = (
                     sampled_state_mean + self.model.inflation_scale(r2_from_mean) * (sampled_state - sampled_state_mean)
                 )
+            if self.dataset.store_trajectory_on_cpu:
+                sampled_state = sampled_state.to('cpu')
             self.dataset.data['predicted_state'].append(sampled_state)
 
 

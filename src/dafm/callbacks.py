@@ -1,6 +1,7 @@
 import logging
 import math
 
+import torch
 from einops import rearrange, reduce
 import lightning.pytorch as pl
 import pandas as pd
@@ -58,47 +59,70 @@ class SaveTrajectories(pl.callbacks.Callback):
 
     def on_train_end(self, trainer, pl_module):
         data = pl_module.dataset.dataset.data.copy()
-        data['true_state'] = rearrange(
-            data['true_state'],
-            't 1 dim -> t dim',
-        )
-        data['observation'] = rearrange(
-            data['observation'],
-            't 1 dim -> t dim',
-        )
         data['predicted_state'] = rearrange(
             data['predicted_state'],
             't predicted_state_count dim -> t predicted_state_count dim'
         )
-        _, predicted_state_count, dim = data['predicted_state'].shape
-        data['predicted_state'] = rearrange(
-            data['predicted_state'],
-            't predicted_state_count dim -> t (predicted_state_count dim)'
-        )
-        data['predicted_state'] = pd.DataFrame(
-            data['predicted_state'].cpu().numpy(),
-            index=range(data['predicted_state'].shape[0]),
-            columns=[
-                f'predicted_state_{state}_dim_{d}'
-                for state in range(predicted_state_count)
-                for d in range(dim)
-            ],
-        )
-        data['true_state'] = pd.DataFrame(
-            data['true_state'].cpu().numpy(),
-            index=range(data['true_state'].shape[0]),
-            columns=[f'true_state_dim_{d}' for d in range(dim)],
-        )
-        data['observation'] = pd.DataFrame(
-            data['observation'].cpu().numpy(),
-            index=range(data['observation'].shape[0]),
-            columns=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
-        )
+        time_step_count = data['times'].shape[0]
         data['times'] = pd.DataFrame(
             data['times'].cpu().numpy(),
-            index=range(data['times'].shape[0]),
+            index=range(time_step_count),
             columns=['times'],
         )
-        df = pd.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], axis=1)
+        time_step_count_predicted, predicted_state_count, dim = data['predicted_state'].shape
+        if pl_module.dataset.dataset.cfg.save_only_mean_std:
+            data['predicted_state_mean'] = reduce(
+                data['predicted_state'],
+                't predicted_state_count dim -> t dim',
+                'mean',
+            )
+            data['predicted_state_std'] = reduce(
+                data['predicted_state'],
+                't predicted_state_count dim -> t dim',
+                torch.std,
+            )
+            for stat in ('mean', 'std'):
+                data[f'predicted_state_{stat}'] = pd.DataFrame(
+                    data[f'predicted_state_{stat}'].cpu().numpy(),
+                    index=range(time_step_count_predicted),
+                    columns=[
+                        f'predicted_state_{stat}_dim_{d}'
+                        for d in range(dim)
+                    ],
+                )
+            df = pd.concat([data[k] for k in ('times', 'predicted_state_mean', 'predicted_state_std')], axis=1)
+        else:
+            data['true_state'] = rearrange(
+                data['true_state'],
+                't 1 dim -> t dim',
+            )
+            data['observation'] = rearrange(
+                data['observation'],
+                't 1 dim -> t dim',
+            )
+            data['predicted_state'] = rearrange(
+                data['predicted_state'],
+                't predicted_state_count dim -> t (predicted_state_count dim)'
+            )
+            data['predicted_state'] = pd.DataFrame(
+                data['predicted_state'].cpu().numpy(),
+                index=range(time_step_count_predicted),
+                columns=[
+                    f'predicted_state_{state}_dim_{d}'
+                    for state in range(predicted_state_count)
+                    for d in range(dim)
+                ],
+            )
+            data['true_state'] = pd.DataFrame(
+                data['true_state'].cpu().numpy(),
+                index=range(time_step_count),
+                columns=[f'true_state_dim_{d}' for d in range(dim)],
+            )
+            data['observation'] = pd.DataFrame(
+                data['observation'].cpu().numpy(),
+                index=range(time_step_count),
+                columns=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
+            )
+            df = pd.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], axis=1)
         df.to_parquet(self.save_path)
         log.info('Trajectory data saved to %s', self.save_path)
