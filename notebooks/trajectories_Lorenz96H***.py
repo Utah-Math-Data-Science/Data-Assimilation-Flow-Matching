@@ -335,51 +335,6 @@ def _(
     return (plot_histogram,)
 
 
-@app.cell
-def _(
-    alt_ids,
-    dim_to_plot,
-    hue_order,
-    map_true_state_trajectory,
-    plot_identifier,
-    predicted_state_trajectory,
-    row_order,
-    sns,
-):
-    plot_confidence = (
-        sns.relplot(
-            kind='line',
-            errorbar=('ci', 95),
-            data=(
-                predicted_state_trajectory
-                .filter(Dimension=dim_to_plot)
-                .collect().to_pandas()
-            ),
-            x='times',
-            y='State',
-            row=plot_identifier,
-            row_order=row_order,
-            hue=plot_identifier,
-            hue_order=hue_order,
-            aspect=3,
-            zorder=0,
-        )
-        .set(xlim=(30, 40))
-    )
-    map_true_state_trajectory(plot_confidence)
-    sns.move_legend(
-        plot_confidence,
-        loc='upper center',
-        ncol=min(len(alt_ids), 2) + 1,
-        title='',
-        bbox_to_anchor=(.455, 1.06),
-        frameon=True,
-        fancybox=True,
-    )
-    plot_confidence
-    return (plot_confidence,)
-
-
 @app.cell(disabled=True)
 def _(label_to_alt_id, plot_histogram, plot_predicted, plots):
     plots.save_all_subfigures(plot_predicted, 'Predicted', renaming=label_to_alt_id)
