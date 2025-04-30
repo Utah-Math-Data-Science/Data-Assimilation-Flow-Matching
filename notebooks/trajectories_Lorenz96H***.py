@@ -21,6 +21,7 @@ def _():
     import sqlalchemy as sa
     import marimo as mo
     import seaborn as sns
+    import polars as pl
 
     from conf import conf
     from dafm import datasets, models, plots, utils
@@ -36,6 +37,7 @@ def _():
         np,
         os,
         pd,
+        pl,
         plots,
         pprint,
         rearrange,
@@ -48,32 +50,16 @@ def _():
 @app.cell
 def _():
     alt_ids = {
-        # H300
-        ('daas0zbq', r'SM-TF ($\epsilon_\alpha=0.5$, $\epsilon_\beta=0.025$)'): {},
-        ('q1h1p9nx', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.0$)'): {},
-        # ('7wbiwugd', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.05$)'): {},
-        # ('vndtd2t3', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.1$)'): {},
-        ('jp0uyobi', r'FM-TF ($\alpha=0.0$, $\sigma_\epsilon=0.5$)'): {},
-        # ('qf40s01f', r'FM-TF ($\alpha=1.01$, $\sigma_\epsilon=0.0$)'): {},
-        # ('6zsipstg', r'FM-TF ($\alpha=1.01$, $\sigma_\epsilon=0.05$)'): {},
-        # ('6ak4pms4', r'FM-TF ($\alpha=1.01$, $\sigma_\epsilon=0.1$)'): {},
-        ('du4ktgor', r'FM-TF ($\alpha=1.01$, $\sigma_\epsilon=0.5$)'): {},
-        # ('3azmqj8h', r'FM-TF ($\alpha=1.05$, $\sigma_\epsilon=0.0$)'): {},
-        # ('mgejwujq', r'FM-TF ($\alpha=1.05$, $\sigma_\epsilon=0.05$)'): {},
-        # ('8g502jvo', r'FM-TF ($\alpha=1.05$, $\sigma_\epsilon=0.1$)'): {},
-        # ('9xhdrnn6', r'FM-TF ($\alpha=1.05$, $\sigma_\epsilon=0.5$)'): {},
-        # ('e96jehhu', r'FM-TF ($\alpha=1.1$, $\sigma_\epsilon=0.0$)'): {},
-        # ('02y8pirf', r'FM-TF ($\alpha=1.1$, $\sigma_\epsilon=0.05$)'): {},
-        # ('pgm8cm0m', r'FM-TF ($\alpha=1.1$, $\sigma_\epsilon=0.1$)'): {},
-        # ('jvzfo18f', r'FM-TF ($\alpha=1.1$, $\sigma_\epsilon=0.5$)'): {},
-        # ('uhn6wquo', r'FM-TF ($\alpha=1.15$, $\sigma_\epsilon=0.0$)'): {},
-        # ('g5aubg4p', r'FM-TF ($\alpha=1.15$, $\sigma_\epsilon=0.05$)'): {},
-        # ('fs43c1uu', r'FM-TF ($\alpha=1.15$, $\sigma_\epsilon=0.1$)'): {},
-        # ('j7zz8ff8', r'FM-TF ($\alpha=1.15$, $\sigma_\epsilon=0.5$)'): {},
-        # ('y1do823b', r'FM-TF ($\alpha=1.2$, $\sigma_\epsilon=0.0$)'): {},
-        # ('veamljn3', r'FM-TF ($\alpha=1.2$, $\sigma_\epsilon=0.05$)'): {},
-        # ('747qijk1', r'FM-TF ($\alpha=1.2$, $\sigma_\epsilon=0.1$)'): {},
-        # ('tfidk90j', r'FM-TF ($\alpha=1.2$, $\sigma_\epsilon=0.5$)'): {},
+        ('bz6r81zr', r'SMM (2376999025)'): {},
+        ('806lerm0', r'SMM (649520)'): {},
+        ('p3s7zz42', r'SMM (5113685)'): {},
+        ('1xb6wto5', r'SMM (5543464)'): {},
+        ('6ga8dhz9', r'SMM (1663576)'): {},
+        ('7kmx2xcx', r'SMM (1013721)'): {},
+        ('7hfcetdp', r'SMM (2347148)'): {},
+        ('xe4kqnc2', r'SMM (4141989)'): {},
+        ('wt5wrr1k', r'SMM (179266)'): {},
+        ('6o2xdada', r'SMM (4824560)'): {},
     }
     alt_id_to_label = dict(list(alt_ids))
     label_to_alt_id = dict(map(reversed, alt_ids))
@@ -93,114 +79,189 @@ def _(alt_ids, conf, pprint, sa):
 
 
 @app.cell
-def _(cfgs, pd):
-    predicted_state_columns = None
-    true_state_columns = None
+def _(cfgs, pl):
+    trajectories = []
     for k, v in cfgs.items():
-        v['trajectories'] = (
-            pd.read_parquet(v['cfg'].run_dir/v['cfg'].prediction_filename)
+        trajectories.append(
+            pl.scan_parquet(v['cfg'].run_dir/v['cfg'].prediction_filename)
+            .select(
+                pl.col('*'),
+                alt_id=pl.lit(k[0]),
+                Model=pl.lit(k[1]),
+            )
         )
-        v['trajectories']['alt_id'] = k[0]
-        v['trajectories']['Model'] = k[1]
-        if predicted_state_columns is None:
-            predicted_state_columns = v['trajectories'].columns[
-                v['trajectories'].columns.str.startswith('predicted_state_')
-            ]
-        if true_state_columns is None:
-            true_state_columns = v['trajectories'].columns[
-                v['trajectories'].columns.str.startswith('true_state_')
-            ]
-    cfgs[k]
-    return k, predicted_state_columns, true_state_columns, v
+    trajectories = pl.concat(trajectories)
+    return k, trajectories, v
 
 
 @app.cell
-def _(cfgs, mo, pd, predicted_state_columns):
+def _(pl, trajectories):
     predicted_state_trajectory = (
-        pd.concat([
-            v['trajectories'][['alt_id', 'Model', 'times', *predicted_state_columns]]
-            for v in cfgs.values()
-        ])
-        .melt(id_vars=['alt_id', 'Model', 'times'], var_name='ParticleAndDimension', value_name='State')
+        trajectories.unpivot(
+            on=pl.selectors.starts_with('predicted_state_'),
+            index=[
+                pl.col('alt_id'), pl.col('Model'),
+                pl.col('times'),
+            ],
+            variable_name='ParticleAndDimension',
+            value_name='State',
+        )
+        .select(
+            pl.col('alt_id'), pl.col('Model'),
+            pl.col('times'),
+            pl.col('State'),
+            Particle=pl.col('ParticleAndDimension').str.split('_').list[2].cast(int),
+            Dimension=pl.col('ParticleAndDimension').str.split('_').list[4].cast(int),
+            # Mean=pl.col('State').mean(1)
+        )
     )
-    particle_and_dimension = predicted_state_trajectory['ParticleAndDimension'].str.split('_')
-    predicted_state_trajectory['Particle'] = particle_and_dimension.str[2].map(int)
-    predicted_state_trajectory['Dimension'] = particle_and_dimension.str[4].map(int)
-    predicted_state_trajectory = (
-        predicted_state_trajectory.set_index(['alt_id', 'Model', 'times', 'Dimension'])
-        .pivot(columns='Particle', values='State')
-    )
-    predicted_state_trajectory['Mean'] = predicted_state_trajectory.mean(1)
-    mo.plain(predicted_state_trajectory)
-    return particle_and_dimension, predicted_state_trajectory
+    predicted_state_trajectory
+    return (predicted_state_trajectory,)
 
 
 @app.cell
-def _(mo, true_state_columns, v):
+def _(pl, trajectories):
     true_state_trajectory = (
-        v['trajectories'][['times', *true_state_columns]]
-        .melt(id_vars='times', var_name='Dimension', value_name='State')
+        trajectories.unpivot(
+            on=pl.selectors.starts_with('true_state_'),
+            index=[
+                pl.col('alt_id'), pl.col('Model'),
+                pl.col('times'),
+            ],
+            variable_name='Dimension',
+            value_name='State',
+        )
+        .select(
+            pl.col('alt_id'), pl.col('Model'),
+            pl.col('times'),
+            pl.col('State'),
+            Particle=pl.lit('True'),
+            Dimension=pl.col('Dimension').str.split('_').list[3].cast(int),
+        )
     )
-    true_state_trajectory['Particle'] = 'True'
-    true_state_trajectory['Dimension'] = true_state_trajectory['Dimension'].str.split('_').str[3].map(int)
-    true_state_trajectory = (
-        true_state_trajectory.set_index(['times', 'Dimension'])
-        .pivot(columns='Particle', values='State')
-    )
-    mo.plain(true_state_trajectory)
+    true_state_trajectory
     return (true_state_trajectory,)
 
 
 @app.cell
-def _(cfgs, predicted_state_trajectory, true_state_trajectory):
-    (
-        predicted_state_trajectory['Mean']
-        .groupby(level=['alt_id', 'Model'])
-        # compute L2 / sqrt(dim)
-        .apply(lambda x: x.loc[x.name] - true_state_trajectory['True'])
-        .pow(2)
-        .groupby(level=['alt_id', 'Model', 'times'])
-        .mean()
-        .pow(1/2)
-        # mean over trajectory
-        .groupby(level=['alt_id', 'Model'])
-        .mean()
-        # sort
-        .loc[[k[0] for k in cfgs]]
-        .rename('Mean(time) RMSE(dim)')
-        .to_frame()
+def _(pl, trajectories):
+    observation_trajectory = (
+        trajectories.unpivot(
+            on=pl.selectors.starts_with('observation_'),
+            index=[
+                pl.col('alt_id'), pl.col('Model'),
+                pl.col('times'),
+            ],
+            variable_name='Dimension',
+            value_name='State',
+        )
+        .select(
+            pl.col('alt_id'), pl.col('Model'),
+            pl.col('times'),
+            pl.col('State'),
+            Particle=pl.lit('Observation'),
+            Dimension=pl.col('Dimension').str.split('_').list[2].cast(int),
+        )
     )
-    return
+    observation_trajectory
+    return (observation_trajectory,)
+
+
+@app.cell
+def _(pl, predicted_state_trajectory, true_state_trajectory):
+    rmse = (
+        predicted_state_trajectory
+        .group_by('alt_id', 'Model', 'times', 'Dimension')
+        .agg(pl.col('State').mean().alias('Mean'))
+        .join(
+            true_state_trajectory,
+            on=['alt_id', 'Model', 'times', 'Dimension'],
+        )
+        .select(
+            pl.col('alt_id'), pl.col('Model'),
+            pl.col('times'),
+            pl.col('Dimension'),
+            (pl.col('Mean') - pl.col('State')).pow(2).alias('DiffPow2'),
+        )
+        .group_by('alt_id', 'Model', 'times')
+        .agg(pl.col('DiffPow2').mean().pow(1/2).alias('RMSE(dim)'))
+
+        # take last time steps
+        .sort('times')
+        .group_by('alt_id', 'Model')
+        .tail(50)
+    
+        .group_by('alt_id', 'Model')
+        .agg(pl.col('RMSE(dim)').mean().alias('Mean(time) RMSE(dim)'))
+
+        .collect()
+    )
+    print(rmse.mean())
+    rmse
+    return (rmse,)
 
 
 @app.cell
 def _(alt_id_to_label, label_to_alt_id):
     dim_to_plot = 0
-    plot_identifier = 'alt_id'
+    plot_identifier = 'Model'
     if plot_identifier == 'alt_id':
         row_order = list(alt_id_to_label)
     elif plot_identifier == 'Model':
         row_order = list(label_to_alt_id)
     else:
         raise ValueError(f'Unknown plot identifier: {plot_identifier}')
-    hue_order = list(alt_id_to_label)
+    hue_order = row_order
     return dim_to_plot, hue_order, plot_identifier, row_order
 
 
 @app.cell
+def _(dim_to_plot, plot_identifier, sns, true_state_trajectory):
+    def map_true_state_trajectory(plot):
+        for (row, col, hue), _ in plot.facet_data():
+            ax = plot.axes[row][col]
+            data = (
+                true_state_trajectory
+                .filter(**{
+                    'Dimension': dim_to_plot,
+                    plot_identifier: plot.row_names[row],
+                })
+                .collect()
+                .to_pandas()
+            )
+            sns.lineplot(
+                data=data,
+                x='times',
+                y='State',
+                color='tab:gray',
+                ax=ax,
+                legend=False,
+            )
+    return (map_true_state_trajectory,)
+
+
+@app.cell
 def _(
+    alt_ids,
     dim_to_plot,
     hue_order,
+    map_true_state_trajectory,
+    pl,
     plot_identifier,
     predicted_state_trajectory,
     row_order,
     sns,
-    true_state_trajectory,
 ):
     plot_predicted = (
         sns.relplot(
             kind='line',
-            data=predicted_state_trajectory.loc[(slice(None), slice(None), slice(None), dim_to_plot), 'Mean'].reset_index(),
+            data=(
+                predicted_state_trajectory
+                .filter(Dimension=dim_to_plot)
+                .group_by('alt_id', 'Model', 'times')
+                .agg(pl.col('State').mean().alias('Mean'))
+                .collect().to_pandas()
+            ),
             x='times',
             y='Mean',
             row=plot_identifier,
@@ -210,19 +271,14 @@ def _(
             hue_order=hue_order,
             aspect=3,
         )
+        # .set(ylim=(-15, 15))
+        # .set(xlim=(None, 32))
     )
-    plot_predicted.map(
-        sns.lineplot,
-        data=true_state_trajectory.loc[(slice(None), 0), 'True'].reset_index(),
-        x='times',
-        y='True',
-        color='tab:gray',
-        zorder=0,
-    )
+    map_true_state_trajectory(plot_predicted)
     sns.move_legend(
         plot_predicted,
         loc='upper center',
-        ncol=min(len(predicted_state_trajectory.index.get_level_values('alt_id').unique()), 2) + 1,
+        ncol=min(len(alt_ids), 2) + 1,
         title='',
         bbox_to_anchor=(.455, 1.06),
         frameon=True,
@@ -234,8 +290,11 @@ def _(
 
 @app.cell
 def _(
+    alt_ids,
     dim_to_plot,
     hue_order,
+    map_true_state_trajectory,
+    pl,
     plot_identifier,
     predicted_state_trajectory,
     row_order,
@@ -246,35 +305,27 @@ def _(
         sns.displot(
             data=(
                 predicted_state_trajectory
-                .loc[(slice(None), slice(None), slice(None), dim_to_plot), :]
-                .filter(regex='\d+', axis=1)
-                .melt(var_name='Particle', value_name='State', ignore_index=False)
-                .reset_index()
+                .filter(Dimension=dim_to_plot)
+                .collect().to_pandas()
             ),
             x='times',
             y='State',
-            bins=(true_state_trajectory.index.get_level_values('times').unique(), 101),
+            bins=(true_state_trajectory.select(pl.col('times')).collect().n_unique(), 101),
             row=plot_identifier,
             row_order=row_order,
             hue=plot_identifier,
             hue_order=hue_order,
             aspect=3,
-            zorder=0,
+            zorder=-1,
         )
-        .set(xlim=(30, 40))
+        # .set(ylim=(-15, 15))
+        # .set(xlim=(None, 40))
     )
-    plot_histogram.map(
-        sns.lineplot,
-        data=true_state_trajectory.loc[(slice(None), dim_to_plot), 'True'].reset_index(),
-        x='times',
-        y='True',
-        color='tab:gray',
-        zorder=0,
-    )
+    map_true_state_trajectory(plot_histogram)
     sns.move_legend(
         plot_histogram,
         loc='upper center',
-        ncol=min(len(predicted_state_trajectory.index.get_level_values('alt_id').unique()), 2) + 1,
+        ncol=min(len(alt_ids), 2) + 1,
         title='',
         bbox_to_anchor=(.455, 1.06),
         frameon=True,
@@ -285,14 +336,48 @@ def _(
 
 
 @app.cell
-def _(dim_to_plot, predicted_state_trajectory):
-    (
-        predicted_state_trajectory
-        .loc[(slice(None), slice(None), slice(None), dim_to_plot), :].filter(regex='\d+', axis=1)
-        .melt(var_name='Particle', value_name='State', ignore_index=False)
-        .reset_index()
+def _(
+    alt_ids,
+    dim_to_plot,
+    hue_order,
+    map_true_state_trajectory,
+    plot_identifier,
+    predicted_state_trajectory,
+    row_order,
+    sns,
+):
+    plot_confidence = (
+        sns.relplot(
+            kind='line',
+            errorbar=('ci', 95),
+            data=(
+                predicted_state_trajectory
+                .filter(Dimension=dim_to_plot)
+                .collect().to_pandas()
+            ),
+            x='times',
+            y='State',
+            row=plot_identifier,
+            row_order=row_order,
+            hue=plot_identifier,
+            hue_order=hue_order,
+            aspect=3,
+            zorder=0,
+        )
+        .set(xlim=(30, 40))
     )
-    return
+    map_true_state_trajectory(plot_confidence)
+    sns.move_legend(
+        plot_confidence,
+        loc='upper center',
+        ncol=min(len(alt_ids), 2) + 1,
+        title='',
+        bbox_to_anchor=(.455, 1.06),
+        frameon=True,
+        fancybox=True,
+    )
+    plot_confidence
+    return (plot_confidence,)
 
 
 @app.cell(disabled=True)
