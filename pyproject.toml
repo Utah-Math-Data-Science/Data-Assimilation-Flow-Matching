@@ -17,6 +17,7 @@ dependencies = [
     "lightning>=2.5.0.post0",
     "marimo[recommended]>=0.12.9",
     "pandas>=2.2.3",
+    "polars>=1.27.1",
     "pyarrow>=19.0.0",
     "pytest>=8.3.4",
     "seaborn>=0.13.2",
