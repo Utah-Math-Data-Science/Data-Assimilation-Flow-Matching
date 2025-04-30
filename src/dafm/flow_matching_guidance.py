@@ -30,42 +30,34 @@ class MonteCarlo(EnergyGuidance):
     def conditional_velocity(self, mean, dt_mean, std, dt_std, time, x):
         return dt_std / std * (x - mean) + dt_mean
 
-    def forward(self, x0, x1, t, xt, dot_xt_unguided, energy_function):
-        monte_carlo_sample_count = x0.shape[0]
-        x0 = rearrange(x0, 'monte_carlo_sample_count dim -> monte_carlo_sample_count 1 dim')
+    def forward(self, _x0, x1, t, xt, dot_xt_unguided, energy_function):
+        # monte_carlo_sample_count = x1.shape[0]
         x1 = rearrange(x1, 'monte_carlo_sample_count dim -> monte_carlo_sample_count 1 dim')
         xt = rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
         mean = self.diffusion_path.mean(t, x1)
         std = self.diffusion_path.std(t, x1)
-        x0_flowed_to_t = mean + x0 * std
         # using Independent(Normal, 1) instead of MultivariateNormal is a trick
         # to specify the covariance matrix as scale * (identity matrix)
         pt_xt_given_z = torch.distributions.Independent(
             # authors used scale=.1, saying that when scale is too small, many more samples are needed
-            torch.distributions.Normal(loc=x0_flowed_to_t, scale=std),
+            torch.distributions.Normal(loc=mean, scale=std),
             1,
         )
         log_pt_xt_given_z = rearrange(
             pt_xt_given_z.log_prob(xt),
             'monte_carlo_sample_count predicted_state_count -> monte_carlo_sample_count predicted_state_count 1',
         )
-        log_samples = torch.tensor(monte_carlo_sample_count, device=xt.device).log()
-        log_pt_x = reduce(
-            log_pt_xt_given_z,
-            'monte_carlo_sample_count predicted_state_count 1 -> 1 predicted_state_count 1',
-            torch.logsumexp,
-        ) - log_samples
+        # log_samples = torch.tensor(monte_carlo_sample_count, device=xt.device).log()
+        log_sample_count_times_pt_xt_given_z_div_pt_x = log_pt_xt_given_z.log_softmax(0)
         neg_energy = rearrange(
             -energy_function(rearrange(x1, 'monte_carlo_sample_count 1 dim -> monte_carlo_sample_count dim')),
             'monte_carlo_sample_count 1 -> monte_carlo_sample_count 1 1',
         )
-        Z = torch.exp(
-            reduce(
-                neg_energy + log_pt_xt_given_z,
-                'monte_carlo_sample_count predicted_state_count 1 -> 1 predicted_state_count 1',
-                torch.logsumexp,
-            ) - log_samples - log_pt_x
+        log_Z = reduce(
+            neg_energy + log_sample_count_times_pt_xt_given_z_div_pt_x,
+            'monte_carlo_sample_count predicted_state_count 1 -> 1 predicted_state_count 1',
+            torch.logsumexp,
         )
         v_xt_given_z = self.conditional_velocity(
             mean, self.diffusion_path.dt_mean(t, x1),
@@ -73,11 +65,11 @@ class MonteCarlo(EnergyGuidance):
             t, xt
         )
         return reduce(
-            (neg_energy.exp() / Z - 1)
+            (neg_energy - log_Z).expm1()
             * v_xt_given_z
-            * (log_pt_xt_given_z - log_pt_x).exp(),
+            * (log_sample_count_times_pt_xt_given_z_div_pt_x).exp(),
             'monte_carlo_sample_count predicted_state_count dim -> predicted_state_count dim',
-            'mean',
+            'sum',
         )
 
 
