@@ -1,4 +1,5 @@
 import logging
+import os
 import pprint
 import sys
 
@@ -75,7 +76,12 @@ def main(cfg):
         dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device)
     with pl.utilities.seed.isolate_rng():
         model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_noise_std)
-    dataset = datasets.PredictedStatesAndObservation(dynamics, model)
+
+    time_step_time_logger = loggers.CSVLogger(cfg.run_dir, name=None)
+    time_step_time_logger.experiment.NAME_METRICS_FILE = 'time_step_times.csv'
+    time_step_time_logger.experiment.metrics_file_path = os.path.join(time_step_time_logger.experiment.log_dir, time_step_time_logger.experiment.NAME_METRICS_FILE)
+
+    dataset = datasets.PredictedStatesAndObservation(dynamics, model, logger=time_step_time_logger)
     data_assimilation = DataAssimilation(cfg, dataset, model)
 
     logger = loggers.CSVLogger(cfg.run_dir, name=None)

@@ -1,5 +1,6 @@
 from collections import defaultdict
 import logging
+import time
 
 from einops import rearrange, reduce, unpack
 import torch
@@ -151,9 +152,10 @@ class Simple(Dataset):
 
 
 class PredictedStatesAndObservation(IterableDataset):
-    def __init__(self, dataset, model):
+    def __init__(self, dataset, model, logger=None):
         self.dataset = dataset
         self.model = model
+        self.logger = logger
         self.time_step = None  # set in iter
 
     def __iter__(self):
@@ -178,6 +180,8 @@ class PredictedStatesAndObservation(IterableDataset):
            initial=1,
            desc='Estimating state at time step',
         ):
+            log_time_step_time_start = time.process_time()
+
             self.time_step = time_step
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
             t_now_and_next, next_predicted_state, next_observation = map(
@@ -211,6 +215,12 @@ class PredictedStatesAndObservation(IterableDataset):
             if self.dataset.store_trajectory_on_cpu:
                 sampled_state = sampled_state.to('cpu')
             self.dataset.data['predicted_state'].append(sampled_state)
+
+            log_time_step_time_end = time.process_time()
+            if self.logger is not None:
+                self.logger.log_metrics(dict(
+                    time_s=log_time_step_time_end - log_time_step_time_start,
+                ), step=time_step + 1)
 
 
 def get_state_perturbation(state_perturbation):
