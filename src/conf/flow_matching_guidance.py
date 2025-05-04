@@ -9,7 +9,8 @@ import conf.diffusion_path
 
 
 class EnergyGuidance(orm.InheritableTable):
-    pass
+    use_approximate_conditional_velocity_for_unguided_velocity: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    approximate_conditional_velocity_scale_data_by_time: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class No(EnergyGuidance):

@@ -413,6 +413,7 @@ class FlowMatching(Model):
         time_step_count = time_step_count or cfg.sampling_time_step_count
         path_time = diffusion_path.linspace_time(time_step_count, device=data.device)
         noise = diffusion_path.sample_noise(path_time[0], data)
+        xt = noise
         if isinstance(cfg.guidance, flow_matching_guidance.No) or observation is None or cfg.ignore_observations:
             velocity = forward
         else:
@@ -422,24 +423,39 @@ class FlowMatching(Model):
             )
             # log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(x1_predicted))
             # inv_two_observation_var = 0.5 / observation_noise_std**2
-            def velocity(t, x):
-                dot_state_unguided = forward(t, x)
-                return dot_state_unguided + guidance(
-                    noise, data,
-                    t, x,
-                    dot_state_unguided,
-                    energy_function=lambda x1_predicted: rearrange(
-                        -observation_likelihood_distribution.log_prob(observe(x1_predicted)),
-                        'predicted_state_count -> predicted_state_count 1',
+            if cfg.guidance.use_approximate_conditional_velocity_for_unguided_velocity:
+                if not isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
+                    raise ValueError(f'use_approximate_conditional_velocity_for_unguided_velocity not supported for diffusion path {cfg.diffusion_path.__class__.__name__}')
+                data = rearrange(data, 'data dim -> data 1 dim')
+                noise = rearrange(noise, 'noise dim -> 1 noise dim')
+                def velocity(t, x):
+                    if cfg.guidance.approximate_conditional_velocity_scale_data_by_time:
+                        conditional_velocity_candidates = t * data - noise
+                    else:
+                        conditional_velocity_candidates = data - noise
+                    expected_conditional_velocity_given_xt = rearrange(
+                        x,
+                        'noise dim -> 1 noise dim',
                     )
-                    # energy_function=lambda x1_predicted: inv_two_observation_var * reduce(
-                    #     (observe(x1_predicted) - observation).square(),
-                    #     'predicted_state_count dim -> predicted_state_count 1',
-                    #     'sum'
-                    # ),
-                )
+                    best_approximate_conditional_velocity_idx = reduce(
+                        (conditional_velocity_candidates - expected_conditional_velocity_given_xt).square(),
+                        'data noise dim -> data noise 1',
+                        'sum',
+                    ).argmin(0, keepdim=True).expand(1, data.shape[0], data.shape[2])
+                    return conditional_velocity_candidates.gather(0, best_approximate_conditional_velocity_idx).squeeze(0)
+            else:
+                def velocity(t, x):
+                    dot_state_unguided = forward(t, x)
+                    return dot_state_unguided + guidance(
+                        noise, data,
+                        t, x,
+                        dot_state_unguided,
+                        energy_function=lambda x1_predicted: rearrange(
+                            -observation_likelihood_distribution.log_prob(observe(x1_predicted)),
+                            'predicted_state_count -> predicted_state_count 1',
+                        )
+                    )
 
-        xt = noise
         time_step_size = path_time[1] - path_time[0]
         time_step_size_sqrt = time_step_size.sqrt()
         for time_step, t_now_and_next in enumerate(path_time.unfold(0, 2, 1)):
