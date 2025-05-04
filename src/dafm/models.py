@@ -152,13 +152,17 @@ class ScoreMatching(Model):
                     )
             score = score + observation_score * observation_likelihood_score_damping(t_now)
 
-            # why use mean? like RMSE?
-            score_norm = reduce(score.square(), 'batch dim -> batch', 'mean').sqrt()
-            score_norm_too_large = score_norm > cfg.sampling_max_score_norm
-            score[score_norm_too_large] = score[score_norm_too_large] * rearrange(
-                cfg.sampling_max_score_norm / score_norm[score_norm_too_large],
-                'batch -> batch 1'
-            )
+            if cfg.sampling_score_norm is conf.models.LNorm.RMS:
+                score_norm = reduce(score.square(), 'batch dim -> batch', 'mean').sqrt()
+                score_norm_too_large = score_norm > cfg.sampling_max_score_norm
+                score[score_norm_too_large] = score[score_norm_too_large] * rearrange(
+                    cfg.sampling_max_score_norm / score_norm[score_norm_too_large],
+                    'batch -> batch 1'
+                )
+            elif cfg.sampling_score_norm is conf.models.LNorm.LInfty:
+                score = score.clamp(min=-cfg.sampling_max_score_norm, max=cfg.sampling_max_score_norm)
+            else:
+                raise ValueError(f'Unknown sampling score norm: {cfg.sampling_score_norm}')
 
             g = diffusion_path.g(t_now)
             if cfg.sampler is conf.models.Sampler.EULER:

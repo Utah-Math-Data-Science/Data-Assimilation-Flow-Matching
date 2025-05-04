@@ -47,6 +47,11 @@ class Sampler(enum.Enum):
     HEUN = enum.auto()
 
 
+class LNorm(enum.Enum):
+    RMS = enum.auto()
+    LInfty = enum.auto()
+
+
 class ScoreMatching(Trainable):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(diffusion_path=omegaconf.MISSING),
@@ -60,6 +65,7 @@ class ScoreMatching(Trainable):
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
     sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
+    sampling_score_norm: LNorm = orm.make_field(orm.ColumnRequired(sa.Enum(LNorm)), default=LNorm.RMS)
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
@@ -80,6 +86,7 @@ class ScoreMatchingMarginal(Trainable):
     sampling_time_step_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=600)
     sampler: Sampler = orm.make_field(orm.ColumnRequired(sa.Enum(Sampler)), default=Sampler.EULER_MARUYAMA)
     sampling_max_score_norm: float = orm.make_field(orm.ColumnRequired(sa.Double), default=50.)
+    sampling_score_norm: LNorm = orm.make_field(orm.ColumnRequired(sa.Enum(LNorm)), default=LNorm.RMS)
 
     diffusion_path: diff_path.DiffusionPath = orm.OneToManyField(diff_path.DiffusionPath, default=omegaconf.MISSING)
 
