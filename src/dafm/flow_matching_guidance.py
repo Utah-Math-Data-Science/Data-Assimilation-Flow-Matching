@@ -4,6 +4,7 @@ from einops import rearrange, reduce
 
 from conf import flow_matching_guidance
 import dafm.diffusion_path
+from dafm import utils
 
 
 class EnergyGuidance:
@@ -39,13 +40,13 @@ class MonteCarlo(EnergyGuidance):
         std = self.diffusion_path.std(t, x1)
         # using Independent(Normal, 1) instead of MultivariateNormal is a trick
         # to specify the covariance matrix as scale * (identity matrix)
-        pt_xt_given_z = torch.distributions.Independent(
+        pt_xt_given_z = utils.Independent(
             # authors used scale=.1, saying that when scale is too small, many more samples are needed
-            torch.distributions.Normal(loc=mean, scale=std),
+            utils.Normal(loc=mean, scale=std),
             1,
         )
         log_pt_xt_given_z = rearrange(
-            pt_xt_given_z.log_prob(xt),
+            pt_xt_given_z.log_prob_unnormalized(xt),
             'monte_carlo_sample_count predicted_state_count -> monte_carlo_sample_count predicted_state_count 1',
         )
         # log_samples = torch.tensor(monte_carlo_sample_count, device=xt.device).log()

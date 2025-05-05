@@ -141,11 +141,11 @@ class ScoreMatching(Model):
             else:
                 with torch.enable_grad():
                     xt_grad = xt.detach().requires_grad_()
-                    observation_likelihood_distribution = torch.distributions.Independent(
-                        torch.distributions.Normal(observation, observation_noise_std),
+                    observation_likelihood_distribution = utils.Independent(
+                        utils.Normal(observation, observation_noise_std),
                         1,
                     )
-                    log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(xt_grad))
+                    log_observation_likelihood = observation_likelihood_distribution.log_prob_unnormalized(observe(xt_grad))
                     observation_score, *_ = torch.autograd.grad(
                         outputs=log_observation_likelihood.sum(),
                         inputs=xt_grad,
@@ -247,15 +247,15 @@ class ScoreMatchingMarginal(nn.Module):
                 break
             mean = self.diffusion_path.mean(time, data[:self.cfg.particle_count])
             std = self.diffusion_path.std(time, data[:self.cfg.particle_count])
-            conditional_distribution = torch.distributions.Independent(
-                torch.distributions.Normal(
+            conditional_distribution = utils.Independent(
+                utils.Normal(
                     loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
                     scale=std,
                 ),
                 1,
             )
             log_pt_given_x1 = rearrange(
-                conditional_distribution.log_prob(
+                conditional_distribution.log_prob_unnormalized(
                     rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
                 ),
                 'particle_count predicted_state_count -> particle_count predicted_state_count 1',
@@ -384,12 +384,12 @@ class FlowMatching(Model):
         if isinstance(self.cfg.guidance, flow_matching_guidance.No) or observation is None or self.cfg.ignore_observations:
             weighting = 1 / predicted_state_count
         else:
-            observation_likelihood_distribution = torch.distributions.Independent(
-                torch.distributions.Normal(observe(state), self.observation_noise_std),
+            observation_likelihood_distribution = utils.Independent(
+                utils.Normal(observe(state), self.observation_noise_std),
                 1,
             )
             log_observation_likelihood = rearrange(
-                observation_likelihood_distribution.log_prob(observation),
+                observation_likelihood_distribution.log_prob_unnormalized(observation),
                 '1 predicted_state_count -> 1 predicted_state_count 1',
             )
             weighting = log_observation_likelihood.softmax(1)
@@ -417,12 +417,10 @@ class FlowMatching(Model):
         if isinstance(cfg.guidance, flow_matching_guidance.No) or observation is None or cfg.ignore_observations:
             velocity = forward
         else:
-            observation_likelihood_distribution = torch.distributions.Independent(
-                torch.distributions.Normal(observation, observation_noise_std),
+            observation_likelihood_distribution = utils.Independent(
+                utils.Normal(observation, observation_noise_std),
                 1,
             )
-            # log_observation_likelihood = observation_likelihood_distribution.log_prob(observe(x1_predicted))
-            # inv_two_observation_var = 0.5 / observation_noise_std**2
             if cfg.guidance.use_approximate_conditional_velocity_for_unguided_velocity:
                 if not isinstance(cfg.diffusion_path, conf.diffusion_path.ConditionalOptimalTransport):
                     raise ValueError(f'use_approximate_conditional_velocity_for_unguided_velocity not supported for diffusion path {cfg.diffusion_path.__class__.__name__}')
@@ -451,7 +449,7 @@ class FlowMatching(Model):
                         t, x,
                         dot_state_unguided,
                         energy_function=lambda x1_predicted: rearrange(
-                            -observation_likelihood_distribution.log_prob(observe(x1_predicted)),
+                            -observation_likelihood_distribution.log_prob_unnormalized(observe(x1_predicted)),
                             'predicted_state_count -> predicted_state_count 1',
                         )
                     )
@@ -588,15 +586,15 @@ class FlowMatchingMarginal(nn.Module):
             dt_mean = self.diffusion_path.dt_mean(time, data)
             std = self.diffusion_path.std(time, data)
             dt_std = self.diffusion_path.dt_std(time, data)
-            conditional_distribution = torch.distributions.Independent(
-                torch.distributions.Normal(
+            conditional_distribution = utils.Independent(
+                utils.Normal(
                     loc=rearrange(mean, 'particle_count dim -> particle_count 1 dim'),
                     scale=std,
                 ),
                 1,
             )
             log_pt_given_x1 = rearrange(
-                conditional_distribution.log_prob(
+                conditional_distribution.log_prob_unnormalized(
                     rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
                 ),
                 'particle_count predicted_state_count -> particle_count predicted_state_count 1',
