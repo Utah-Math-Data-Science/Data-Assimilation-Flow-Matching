@@ -14,6 +14,7 @@ from dafm import models, datasets
 def test_simple_dataset(engine, observe_every_n_time_steps):
     cfg = init_hydra_cfg('conf', [
         'dataset=_Simple',
+        'dataset.predicted_state_count=2',
         f'dataset.observe_every_n_time_steps={observe_every_n_time_steps}',
         'model=ScoreMatchingMarginalBao2024EnSF',
         'model.epoch_count=1',
