@@ -19,5 +19,6 @@ class VarianceExploding(DiffusionPath):
 class Bao2024EnsembleScoreMatching(DiffusionPath):
     epsilon_alpha: float = orm.make_field(orm.ColumnRequired(sa.Double), default=.5)
     epsilon_beta: float = orm.make_field(orm.ColumnRequired(sa.Double), default=.025)
+    renormalize_sampled_noise: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
     sample_noise_add_mean: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
     sample_noise_scale_std: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)

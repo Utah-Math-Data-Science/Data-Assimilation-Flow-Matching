@@ -68,7 +68,7 @@ def test_bao_2024_ensemble_score_matching(engine):
     conf.orm.create_all(engine)
     with conf.sa.orm.Session(engine) as db:
         cfg = conf.orm.instantiate_and_insert_config(db, cfg)
-        path = diffusion_path.get_diffusion_path(cfg.model.diffusion_path, target_distribution_at_time_1=True)
+        path = diffusion_path.get_diffusion_path(cfg.model.diffusion_path, target_distribution_at_time_1=False)
 
     data = torch.tensor(1.)
     t_noise = torch.tensor(0.)
@@ -90,3 +90,17 @@ def test_bao_2024_ensemble_score_matching(engine):
                 inputs=t,
             )
             assert dt_squared_beta == path.dt_squared_beta(t)
+
+
+def test_bao_2024_ensemble_score_matching_renormalize_sampled_noise(engine):
+    cfg = init_hydra_cfg('conf', ['dataset=DoubleWell', 'model=ScoreMatchingMarginalBao2024EnSF', 'model.diffusion_path.renormalize_sampled_noise=true'])
+    conf.orm.create_all(engine)
+    with conf.sa.orm.Session(engine) as db:
+        cfg = conf.orm.instantiate_and_insert_config(db, cfg)
+        path = diffusion_path.get_diffusion_path(cfg.model.diffusion_path, target_distribution_at_time_1=False)
+
+    data = torch.ones(2)
+    t_noise = torch.tensor(0.)
+    noise = path.sample_noise(t_noise, data)
+    assert (noise.mean(0) == 0.).all()
+    assert (noise.std(0) == 1.).all()

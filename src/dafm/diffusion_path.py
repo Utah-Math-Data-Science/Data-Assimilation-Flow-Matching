@@ -332,6 +332,8 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
         if self.target_distribution_at_time_1:
             raise NotImplementedError()
         noise = torch.randn_like(data)
+        if self.cfg.renormalize_sampled_noise:
+            noise = (noise - noise.mean(0)) / noise.std(0)
         if self.cfg.sample_noise_scale_std:
             noise = noise * self.std(t, data)
         if self.cfg.sample_noise_add_mean:
