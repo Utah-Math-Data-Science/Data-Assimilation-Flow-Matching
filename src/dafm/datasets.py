@@ -3,6 +3,7 @@ import logging
 import time
 
 from einops import rearrange, reduce, unpack
+import numpy as np
 import torch
 from torch.utils.data.dataset import IterableDataset
 from tqdm import tqdm
@@ -142,6 +143,120 @@ class Lorenz96(Dataset):
         return (x_p1 - x_m2) * x_m1 - x + self.cfg.forcing
 
 
+class NavierStokes(Dataset):
+    def initialize_true_state(self, cfg, device):
+        # linspace excluding endpoint
+        horizontal_axis = torch.linspace(0, cfg.grid_width, cfg.grid_horizontal_count + 1, device=device)[:-1]
+        vertical_axis = torch.linspace(0, cfg.grid_height, cfg.grid_vertical_count + 1, device=device)[:-1]
+        self.grid_horizontal_spacing = (horizontal_axis[1] - horizontal_axis[0]).item()
+        self.grid_vertical_spacing = (vertical_axis[1] - vertical_axis[0]).item()
+
+        horizontal_grid, vertical_grid = torch.meshgrid(horizontal_axis, vertical_axis, indexing='ij')
+
+        horizontal_velocity = self.sample_squared_exponential_gaussian_process(cfg, device)
+        vertical_velocity = self.sample_squared_exponential_gaussian_process(cfg, device)
+        b0 = self.divergence(horizontal_velocity, vertical_velocity) / cfg.time_step_size
+        pressure = torch.zeros((cfg.grid_horizontal_count, cfg.grid_vertical_count), device=device)
+        pressure  = self.pressure_poisson(pressure, b0)
+        dhorizontal_pressure, dvertical_pressure = self.gradient(pressure)
+        horizontal_velocity = horizontal_velocity - cfg.time_step_size * dhorizontal_pressure
+        vertical_velocity = vertical_velocity - cfg.time_step_size * dvertical_pressure
+
+        x = rearrange(
+            [pressure, horizontal_velocity, vertical_velocity],
+            'value_count grid_horizontal_count grid_vertical_count -> 1 (value_count grid_horizontal_count grid_vertical_count)'
+        )
+
+        self.horizontal_forcing = cfg.forcing_amplitude * torch.sin(2 * torch.pi * cfg.vertical_mode_number / cfg.grid_height * vertical_grid)
+        self.vertical_forcing = torch.zeros_like(self.horizontal_forcing)
+
+        return x
+
+    def sample_squared_exponential_gaussian_process(self, cfg, device):
+        w = np.random.randn(cfg.grid_horizontal_count, cfg.grid_vertical_count)
+        w_hat = np.fft.fft2(w)
+        kx = np.fft.fftfreq(cfg.grid_horizontal_count, d=self.grid_horizontal_spacing)
+        ky = np.fft.fftfreq(cfg.grid_vertical_count, d=self.grid_vertical_spacing)
+        KX, KY = np.meshgrid(kx, ky, indexing='ij')
+        S = np.exp(-2 * np.pi**2 * cfg.gaussian_process_length_scale**2 * (KX**2 + KY**2))
+        f = np.fft.ifft2(w_hat * np.sqrt(S)).real
+        out = cfg.gaussian_process_std * (f - f.mean()) / f.std()
+        return torch.tensor(out, device=device)
+
+    def _step_state(self, time_step, t_now_and_next, state, model_noise):
+        """
+        Chorin's projection method.
+        """
+        pressure, horizontal_velocity, vertical_velocity = rearrange(
+            state,
+            'predicted_state_count (value_count grid_horizontal_count grid_vertical_count) -> value_count predicted_state_count grid_horizontal_count grid_vertical_count',
+            value_count=3, grid_horizontal_count=self.cfg.grid_horizontal_count, grid_vertical_count=self.cfg.grid_vertical_count,
+        )
+
+        # advection
+        horizontal_advection = self.advect(horizontal_velocity, vertical_velocity, horizontal_velocity)
+        vertical_advection = self.advect(horizontal_velocity, vertical_velocity, vertical_velocity)
+
+        # intermediate velocity + forcing
+        horizontal_velocity_predictive = horizontal_velocity + self.cfg.time_step_size * (
+            self.cfg.viscosity * self.laplacian(horizontal_velocity)
+            - horizontal_advection + self.horizontal_forcing
+        )
+        vertical_velocity_predictive = vertical_velocity + self.cfg.time_step_size * (
+            self.cfg.viscosity * self.laplacian(vertical_velocity)
+            - vertical_advection + self.vertical_forcing
+        )
+
+        # pressure correction
+        b = self.divergence(horizontal_velocity_predictive, vertical_velocity_predictive) / self.cfg.time_step_size
+        pressure = self.pressure_poisson(pressure, b)
+
+        # project to incompressible
+        dhorizontal_pressure, dvertical_pressure = self.gradient(pressure)
+        horizontal_velocity = horizontal_velocity_predictive - self.cfg.time_step_size * dhorizontal_pressure
+        vertical_velocity = vertical_velocity_predictive - self.cfg.time_step_size * dvertical_pressure
+
+        state = rearrange(
+            [pressure, horizontal_velocity, vertical_velocity],
+            'value_count predicted_state_count grid_horizontal_count grid_vertical_count -> predicted_state_count (value_count grid_horizontal_count grid_vertical_count)'
+        )
+
+        return state
+
+    def laplacian(self, f):
+        return (
+            (f.roll(-1, -2) - 2 * f + f.roll(1, -2)) / self.grid_horizontal_spacing**2
+            + (f.roll(-1, -1) - 2 * f + f.roll(1, -1)) / self.grid_vertical_spacing**2
+        )
+
+    def divergence(self, horizontal_f, vertical_f):
+        return (
+            (horizontal_f.roll(-1, -2) - horizontal_f.roll(1, -2)) / (2 * self.grid_horizontal_spacing)
+            + (vertical_f.roll(-1, -1) - vertical_f.roll(1, -1)) / (2 * self.grid_vertical_spacing)
+        )
+
+    def gradient(self, f):
+        dfdx = (f.roll(-1, -2) - f.roll(1, -2)) / (2 * self.grid_horizontal_spacing)
+        dfdy = (f.roll(-1, -1) - f.roll(1, -1)) / (2 * self.grid_vertical_spacing)
+        return dfdx, dfdy
+
+    def pressure_poisson(self, pressure, b):
+        for _ in range(self.cfg.pressure_poisson_solve_iteration_count):
+            pressure = (
+                (pressure.roll(1, -2) + pressure.roll(-1, -2)) * self.grid_vertical_spacing**2
+                + (pressure.roll(1, -1) + pressure.roll(-1, -1)) * self.grid_horizontal_spacing**2
+                - b * self.grid_horizontal_spacing**2 * self.grid_vertical_spacing**2
+            ) / (
+                2 * (self.grid_horizontal_spacing**2 + self.grid_vertical_spacing**2)
+            )
+        return pressure
+
+    def advect(self, u, v, f):
+        dfdx = (f.roll(-1, -2) - f.roll(1, -2)) / (2 * self.grid_horizontal_spacing)
+        dfdy = (f.roll(-1, -1) - f.roll(1, -1)) / (2 * self.grid_vertical_spacing)
+        return u * dfdx + v * dfdy
+
+
 class Simple(Dataset):
     def initialize_true_state(self, cfg, device):
         true_state = torch.zeros((1, self.cfg.state_dimension), device=device)
@@ -251,6 +366,8 @@ def get_dynamics_dataset(cfg, device):
         return Lorenz63(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.Lorenz96):
         return Lorenz96(cfg, observe, state_perturbation, device)
+    elif isinstance(cfg, conf.datasets.NavierStokes):
+        return NavierStokes(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.Simple):
         return Simple(cfg, observe, state_perturbation, device)
     else:

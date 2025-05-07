@@ -28,7 +28,6 @@ class Dataset(orm.InheritableTable):
         dict(observe='Full'),
         '_self_',
     ])
-    save_only_mean_std: bool = field(default=False)
     trajectory_stored_on_gpu_max_state_dimension: int = field(default=50)
     state_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
 
@@ -51,6 +50,9 @@ class Dataset(orm.InheritableTable):
 
     state_perturbation: StatePerturbation = orm.make_field(orm.ColumnRequired(sa.Enum(StatePerturbation)), default=StatePerturbation.IDENTITY)
 
+    @property
+    def save_only_mean_std(self):
+        return self.state_dimension >= 100 and self.predicted_state_count > 1
 
 class Simple(Dataset):
     pass
@@ -79,3 +81,19 @@ class Lorenz96(Dataset):
     def __post_init__(self):
         if self.state_dimension < 3:
             raise ValueError(f"The dimension of Lorenz '96 must be at least 4, not {self.state_dimension}.")
+
+
+class NavierStokes(Dataset):
+    grid_horizontal_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=128)
+    grid_vertical_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=128)
+    grid_width: float = orm.make_field(orm.ColumnRequired(sa.Double), default=2.)
+    grid_height: float = orm.make_field(orm.ColumnRequired(sa.Double), default=2.)
+
+    forcing_amplitude: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5e-2)
+    vertical_mode_number: float = orm.make_field(orm.ColumnRequired(sa.Double), default=8.)
+    viscosity: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1e-3)
+
+    pressure_poisson_solve_iteration_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=100)
+
+    gaussian_process_length_scale: float = orm.make_field(orm.ColumnRequired(sa.Double), default=.2)
+    gaussian_process_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)
