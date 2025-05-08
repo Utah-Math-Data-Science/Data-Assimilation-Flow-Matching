@@ -59,6 +59,7 @@ class SaveTrajectories(pl.callbacks.Callback):
 
     def on_train_end(self, trainer, pl_module):
         data = pl_module.dataset.dataset.data.copy()
+        data['predicted_state'][-1] = data['predicted_state'][-1].to('cpu')
         data['predicted_state'] = rearrange(
             data['predicted_state'],
             't predicted_state_count dim -> t predicted_state_count dim'

@@ -99,10 +99,6 @@ class Dataset:
         for time_step, t_now_and_next in enumerate(self.data['times'].unfold(0, 2, 1)):
             ignore_observation = time_step % self.cfg.observe_every_n_time_steps != 0
             yield time_step, t_now_and_next, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1], ignore_observation
-        self.data['predicted_state'] = rearrange(
-            self.data['predicted_state'],
-            't predicted_state_count dim -> t predicted_state_count dim'
-        )
 
 
 class DoubleWell(Dataset):
@@ -329,6 +325,8 @@ class PredictedStatesAndObservation(IterableDataset):
                 )
             if self.dataset.store_trajectory_on_cpu:
                 sampled_state = sampled_state.to('cpu')
+            if len(self.dataset.data['predicted_state']) > 0:
+                self.dataset.data['predicted_state'][-1] = self.dataset.data['predicted_state'][-1].to('cpu')
             self.dataset.data['predicted_state'].append(sampled_state)
 
             log_time_step_time_end = time.process_time()
