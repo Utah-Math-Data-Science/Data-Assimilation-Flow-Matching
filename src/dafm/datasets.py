@@ -409,6 +409,9 @@ class PredictedStatesAndObservation(IterableDataset):
                     time_s=log_time_step_time_end - log_time_step_time_start,
                 ), step=time_step + 1)
 
+        if self.logger is not None:
+            self.logger.save()
+
 
 def get_state_perturbation(state_perturbation):
     if state_perturbation is conf.datasets.StatePerturbation.IDENTITY:
