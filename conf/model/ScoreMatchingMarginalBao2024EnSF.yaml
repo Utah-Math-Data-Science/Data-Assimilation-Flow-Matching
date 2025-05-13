@@ -14,3 +14,5 @@ diffusion_path:
   sample_noise_scale_std: false
 
 particle_count: ${oc.select:..dataset.predicted_state_count,1}
+
+sampling_score_norm: LInfty
