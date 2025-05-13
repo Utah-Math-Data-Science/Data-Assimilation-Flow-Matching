@@ -1,0 +1,19 @@
+defaults:
+  - _KuramotoSivashinsky
+  - override observe: ATan
+  - _self_
+
+state_dimension: 1024
+
+observation_noise_std: .1
+predicted_state_initial_condition_std: 1.
+
+predicted_state_count: 20
+
+time_step_count: 6000
+time_step_count_drop_first: 2000
+time_step_size: .25
+
+observe_every_n_time_steps: 4
+
+integrator: RUNGE_KUTTA_4  # not true, but this setting enforces that model noise is zero

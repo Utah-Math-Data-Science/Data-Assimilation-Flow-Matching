@@ -51,6 +51,7 @@ orm.store_config(datasets.Simple, group=Conf.dataset.key, name=f'_{datasets.Simp
 orm.store_config(datasets.Lorenz63, group=Conf.dataset.key, name=f'_{datasets.Lorenz63.__name__}')
 orm.store_config(datasets.Lorenz96, group=Conf.dataset.key, name=f'_{datasets.Lorenz96.__name__}')
 orm.store_config(datasets.NavierStokes, group=Conf.dataset.key, name=f'_{datasets.NavierStokes.__name__}')
+orm.store_config(datasets.KuramotoSivashinsky, group=Conf.dataset.key, name=f'_{datasets.KuramotoSivashinsky.__name__}')
 orm.store_config(observe.Full, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(observe.EveryNthDimension, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')
 orm.store_config(observe.Exponentiate, group=f'{Conf.dataset.key}/{datasets.Dataset.observe.key}')

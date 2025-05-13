@@ -8,6 +8,7 @@ import torch
 from torch.utils.data.dataset import IterableDataset
 from tqdm import tqdm
 from torchdiffeq import odeint
+import dapper.mods.KS
 
 import conf.datasets
 import conf.inflation_scale
@@ -253,6 +254,79 @@ class NavierStokes(Dataset):
         return u * dfdx + v * dfdy
 
 
+class KuramotoSivashinsky(Dataset):
+    def __init__(self, cfg, observe, state_perturbation, device):
+        self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
+        if self.store_trajectory_on_cpu:
+            device = 'cpu'
+        self.solve = self.etd_rk4_wrapper(cfg, device)
+        super().__init__(cfg, observe, state_perturbation, device)
+
+    def initialize_true_state(self, cfg, device):
+        x0 = torch.tensor(dapper.mods.KS.Model(
+            dt=cfg.time_step_size,
+            DL=cfg.domain_pi_multiple,
+            Nx=cfg.state_dimension,
+        ).x0, device=device)
+        x0 = rearrange(x0, 'state_dimension -> 1 state_dimension')
+        return x0 + torch.randn_like(x0)
+
+    def _step_state(self, time_step, t_now_and_next, state, model_noise):
+        return self.solve(None, state)
+
+    def etd_rk4_wrapper(self, cfg, device):
+        """ Returns an ETD-RK4 integrator for the KS equation. Currently very specific, need
+        to adjust this to fit into the same framework as the ODE integrators
+
+        Directly ported from https://github.com/nansencenter/DAPPER/blob/master/dapper/mods/KS/core.py
+        which is adapted from kursiv.m of Kassam and Trefethen, 2002, doi.org/10.1137/S1064827502410633.
+        """
+        kk = np.append(np.arange(0, cfg.state_dimension / 2), 0) * 2 / cfg.domain_pi_multiple  # wave nums for rfft
+        h = cfg.time_step_size
+
+        # Operators
+        L = kk ** 2 - kk ** 4  # Linear operator for K-S eqn: F[ - u_xx - u_xxxx]
+
+        # Precompute ETDRK4 scalar quantities
+        E = torch.tensor(np.exp(h * L), device=device).unsqueeze(0)  # Integrating factor, eval at dt
+        E2 = torch.tensor(np.exp(h * L / 2), device=device).unsqueeze(0)  # Integrating factor, eval at dt/2
+
+        # Roots of unity are used to discretize a circular contour...
+        nRoots = 16
+        roots = np.exp(1j * np.pi * (0.5 + np.arange(nRoots)) / nRoots)
+        # ... the associated integral then reduces to the mean,
+        # g(CL).mean(axis=-1) ~= g(L), whose computation is more stable.
+        CL = h * L[:, None] + roots  # Contour for (each element of) L
+        # E * exact_integral of integrating factor:
+        Q = torch.tensor(h * ((np.exp(CL / 2) - 1) / CL).mean(axis=-1).real, device=device).unsqueeze(0)
+        # RK4 coefficients (modified by Cox-Matthews):
+        f1 = torch.tensor(h * ((-4 - CL + np.exp(CL) * (4 - 3 * CL + CL ** 2)) / CL ** 3).mean(axis=-1).real, device=device).unsqueeze(0)
+        f2 = torch.tensor(h * ((2 + CL + np.exp(CL) * (-2 + CL)) / CL ** 3).mean(axis=-1).real, device=device).unsqueeze(0)
+        f3 = torch.tensor(h * ((-4 - 3 * CL - CL ** 2 + np.exp(CL) * (4 - CL)) / CL ** 3).mean(axis=-1).real, device=device).unsqueeze(0)
+
+        D = 1j * torch.tensor(kk, device=device)  # Differentiation to compute:  F[ u_x ]
+
+        def NL(v):
+            return -.5 * D * torch.fft.rfft(torch.fft.irfft(v, dim=-1) ** 2, dim=-1)
+
+        def inner(t, v):
+            v = torch.fft.rfft(v, dim=-1)
+            N1 = NL(v)
+            v1 = E2 * v + Q * N1
+
+            N2a = NL(v1)
+            v2a = E2 * v + Q * N2a
+
+            N2b = NL(v2a)
+            v2b = E2 * v1 + Q * (2 * N2b - N1)
+
+            N3 = NL(v2b)
+            v = E * v + N1 * f1 + 2 * (N2a + N2b) * f2 + N3 * f3
+            return torch.fft.irfft(v, dim=-1)
+
+        return inner
+
+
 class Simple(Dataset):
     def initialize_true_state(self, cfg, device):
         true_state = torch.zeros((1, self.cfg.state_dimension), device=device)
@@ -366,6 +440,8 @@ def get_dynamics_dataset(cfg, device):
         return Lorenz96(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.NavierStokes):
         return NavierStokes(cfg, observe, state_perturbation, device)
+    elif isinstance(cfg, conf.datasets.KuramotoSivashinsky):
+        return KuramotoSivashinsky(cfg, observe, state_perturbation, device)
     elif isinstance(cfg, conf.datasets.Simple):
         return Simple(cfg, observe, state_perturbation, device)
     else:

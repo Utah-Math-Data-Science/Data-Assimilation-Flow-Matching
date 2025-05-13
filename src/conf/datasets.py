@@ -97,3 +97,7 @@ class NavierStokes(Dataset):
 
     gaussian_process_length_scale: float = orm.make_field(orm.ColumnRequired(sa.Double), default=.2)
     gaussian_process_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)
+
+
+class KuramotoSivashinsky(Dataset):
+    domain_pi_multiple: float = orm.make_field(orm.ColumnRequired(sa.Double), default=128)
