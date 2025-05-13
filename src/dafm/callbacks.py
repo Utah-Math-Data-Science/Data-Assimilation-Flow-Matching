@@ -5,6 +5,7 @@ import torch
 from einops import rearrange, reduce
 import lightning.pytorch as pl
 import pandas as pd
+import polars
 
 from dafm import utils
 
@@ -65,10 +66,10 @@ class SaveTrajectories(pl.callbacks.Callback):
             't predicted_state_count dim -> t predicted_state_count dim'
         )
         time_step_count = data['times'].shape[0]
-        data['times'] = pd.DataFrame(
+        data['times'] = polars.DataFrame(
             data['times'].cpu().numpy(),
-            index=range(time_step_count),
-            columns=['times'],
+            schema=['times'],
+            orient='row',
         )
         time_step_count_predicted, predicted_state_count, dim = data['predicted_state'].shape
         if pl_module.dataset.dataset.cfg.save_only_mean_std:
@@ -83,15 +84,15 @@ class SaveTrajectories(pl.callbacks.Callback):
                 torch.std,
             )
             for stat in ('mean', 'std'):
-                data[f'predicted_state_{stat}'] = pd.DataFrame(
+                data[f'predicted_state_{stat}'] = polars.DataFrame(
                     data[f'predicted_state_{stat}'].cpu().numpy(),
-                    index=range(time_step_count_predicted),
-                    columns=[
+                    schema=[
                         f'predicted_state_{stat}_dim_{d}'
                         for d in range(dim)
                     ],
+                    orient='row',
                 )
-            df = pd.concat([data[k] for k in ('times', 'predicted_state_mean', 'predicted_state_std')], axis=1)
+            df = polars.concat([data[k] for k in ('times', 'predicted_state_mean', 'predicted_state_std')], how='horizontal')
         else:
             data['true_state'] = rearrange(
                 data['true_state'],
@@ -105,25 +106,25 @@ class SaveTrajectories(pl.callbacks.Callback):
                 data['predicted_state'],
                 't predicted_state_count dim -> t (predicted_state_count dim)'
             )
-            data['predicted_state'] = pd.DataFrame(
+            data['predicted_state'] = polars.DataFrame(
                 data['predicted_state'].cpu().numpy(),
-                index=range(time_step_count_predicted),
-                columns=[
+                schema=[
                     f'predicted_state_{state}_dim_{d}'
                     for state in range(predicted_state_count)
                     for d in range(dim)
                 ],
+                orient='row',
             )
-            data['true_state'] = pd.DataFrame(
+            data['true_state'] = polars.DataFrame(
                 data['true_state'].cpu().numpy(),
-                index=range(time_step_count),
-                columns=[f'true_state_dim_{d}' for d in range(dim)],
+                schema=[f'true_state_dim_{d}' for d in range(dim)],
+                orient='row',
             )
-            data['observation'] = pd.DataFrame(
+            data['observation'] = polars.DataFrame(
                 data['observation'].cpu().numpy(),
-                index=range(time_step_count),
-                columns=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
+                schema=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
+                orient='row',
             )
-            df = pd.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], axis=1)
-        df.to_parquet(self.save_path)
+            df = polars.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], how='horizontal')
+        df.write_parquet(self.save_path)
         log.info('Trajectory data saved to %s', self.save_path)
