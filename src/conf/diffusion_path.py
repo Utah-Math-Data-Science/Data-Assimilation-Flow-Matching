@@ -12,6 +12,7 @@ class ConditionalOptimalTransport(DiffusionPath):
 
 class PreviousPosteriorToPredictive(DiffusionPath):
     sigma_min: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+    use_independent_coupling: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
 
 
 class VarianceExploding(DiffusionPath):

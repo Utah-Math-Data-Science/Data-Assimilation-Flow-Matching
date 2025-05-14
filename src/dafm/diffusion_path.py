@@ -191,7 +191,11 @@ class PreviousPosteriorToPredictive(GaussianPath):
         -------
         torch.Tensor
         """
-        return self.previous_posterior + torch.randn_like(predictive) * self.std(t, predictive)
+        previous_posterior = self.previous_posterior
+        if self.cfg.use_independent_coupling:
+            shuffle = torch.randperm(previous_posterior.shape[0], device=previous_posterior.device)
+            previous_posterior = previous_posterior[shuffle]
+        return previous_posterior# + torch.randn_like(predictive) * self.std(t, predictive)
 
 
 class VarianceExploding(GaussianPath):
