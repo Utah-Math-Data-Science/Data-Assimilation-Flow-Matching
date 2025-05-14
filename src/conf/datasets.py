@@ -28,7 +28,7 @@ class Dataset(orm.InheritableTable):
         dict(observe='Full'),
         '_self_',
     ])
-    trajectory_stored_on_gpu_max_state_dimension: int = field(default=50)
+    trajectory_stored_on_gpu_max_state_dimension: int = field(default=200000)
     state_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
 
     model_noise_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)

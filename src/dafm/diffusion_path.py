@@ -102,6 +102,98 @@ class ConditionalOptimalTransport(GaussianPath):
         return torch.randn_like(data) * self.std(t, data)
 
 
+class PreviousPosteriorToPredictive(GaussianPath):
+    r"""
+    This probability path approximates the target (predictive) distribution
+    when :math:`t = 1` and is the previous posterior distribution at
+    :math:`t = 0`.
+
+    .. warning::
+       Behavior for `target_distribution_at_time_1=False` is not implemented.
+    """
+    previous_posterior = None
+
+    def set_previous_posterior(self, previous_posterior):
+        """
+        Save sample from the previous posterior to be used to define the mean
+        of the probability path.
+
+        Parameters
+        ----------
+        previous_posterior: torch.Tensor
+            Sample from the previous posterior.
+        """
+        self.previous_posterior = previous_posterior
+
+    def sample_time(self, t_shape, **kwargs):
+        return torch.rand(t_shape, **kwargs)
+
+    def linspace_time(self, time_step_count, **kwargs):
+        return torch.linspace(0., 1., time_step_count, **kwargs)
+
+    def mean(self, t, predictive):
+        """
+        The mean of the Gaussian conditional probability path.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        predictive: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        return t * predictive + (1 - t) * self.previous_posterior
+
+    def dt_mean(self, t, predictive):
+        return predictive - self.previous_posterior
+
+    def std(self, t, predictive):
+        """
+        The standard devation of the Gaussian conditional probability path.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        predictive: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        return self.cfg.sigma_min
+
+    def dt_std(self, t, predictive):
+        return 0.
+
+    def sample_noise(self, t, predictive):
+        """
+        Sample noise with mean zero and standard deviation at time :math:`t`.
+        This method makes sense when :math:`t` is the time where the
+        probability path is closest to the noise distribution.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            Time along the probability path.
+
+        predictive: torch.Tensor
+            Sample from the target distribution.
+
+        Returns
+        -------
+        torch.Tensor
+        """
+        return self.previous_posterior + torch.randn_like(predictive) * self.std(t, predictive)
+
+
 class VarianceExploding(GaussianPath):
     r"""
     This probability path approximates the target distribution when
@@ -344,6 +436,8 @@ class Bao2024EnsembleScoreMatching(GaussianPath):
 def get_diffusion_path(cfg, target_distribution_at_time_1=False):
     if isinstance(cfg, diffusion_path.ConditionalOptimalTransport):
         return ConditionalOptimalTransport(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
+    if isinstance(cfg, diffusion_path.PreviousPosteriorToPredictive):
+        return PreviousPosteriorToPredictive(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
     elif isinstance(cfg, diffusion_path.VarianceExploding):
         return VarianceExploding(cfg, target_distribution_at_time_1=target_distribution_at_time_1)
     elif isinstance(cfg, diffusion_path.Bao2024EnsembleScoreMatching):

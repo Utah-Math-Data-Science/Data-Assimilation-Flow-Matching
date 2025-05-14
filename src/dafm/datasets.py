@@ -12,6 +12,7 @@ import dapper.mods.KS
 
 import conf.datasets
 import conf.inflation_scale
+import conf.diffusion_path
 import dafm.observe
 
 
@@ -347,6 +348,8 @@ class PredictedStatesAndObservation(IterableDataset):
         if self.model.cfg.train_on_initial_predicted_state:
             time_step, t_now_and_next, predicted_state, next_observation, _ = next(iter(self.dataset))
             self.time_step = time_step
+            if isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
+                self.model.diffusion_path.set_previous_posterior(predicted_state)
             t_now_and_next, predicted_state, next_observation = map(
                 lambda x: x.to(self.dataset.device),
                 (t_now_and_next, predicted_state, next_observation)
@@ -368,6 +371,8 @@ class PredictedStatesAndObservation(IterableDataset):
             log_time_step_time_start = time.process_time()
 
             self.time_step = time_step
+            if isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
+                self.model.diffusion_path.set_previous_posterior(predicted_state)
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
             t_now_and_next, next_predicted_state, next_observation = map(
                 lambda x: x.to(self.dataset.device),

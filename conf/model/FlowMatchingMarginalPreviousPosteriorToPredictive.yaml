@@ -1,0 +1,12 @@
+defaults:
+  - _FlowMatchingMarginal
+  - override diffusion_path: PreviousPosteriorToPredictive
+  - override inflation_scale: NoScaling
+  - _self_
+
+train_on_initial_predicted_state: false
+
+diffusion_path:
+  sigma_min: 1e-2
+
+sampler: EULER

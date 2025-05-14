@@ -132,7 +132,7 @@ class FlowMatching(Trainable):
                     f' Please set model/guidance/diffusion_path={self.diffusion_path.__class__.__name__} so that the diffusion path of the guidance agrees with the diffusion path used by the flow matching model.'
                 )
         if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
-            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, (diff_path.ConditionalOptimalTransport, diff_path.PreviousPosteriorToPredictive)):
                 raise ValueError(
                     'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
                     f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
@@ -168,7 +168,7 @@ class FlowMatchingMarginal(Trainable):
                     f' Please set model/guidance/diffusion_path={self.diffusion_path.__class__.__name__} so that the diffusion path of the guidance agrees with the diffusion path used by the flow matching model.'
                 )
         if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
-            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, (diff_path.ConditionalOptimalTransport, diff_path.PreviousPosteriorToPredictive)):
                 raise ValueError(
                     'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
                     f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
@@ -197,7 +197,7 @@ class FlowMatchingGaussianTarget(Model):
                     f' Please set model/guidance/diffusion_path={self.diffusion_path.__class__.__name__} so that the diffusion path of the guidance agrees with the diffusion path used by the flow matching model.'
                 )
         if self.guidance != omegaconf.MISSING and isinstance(self.guidance, flow_matching_guidance.Local):
-            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, diff_path.ConditionalOptimalTransport):
+            if self.diffusion_path != omegaconf.MISSING and not isinstance(self.diffusion_path, (diff_path.ConditionalOptimalTransport, diff_path.PreviousPosteriorToPredictive)):
                 raise ValueError(
                     'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
                     f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
