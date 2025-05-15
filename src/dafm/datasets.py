@@ -372,7 +372,7 @@ class PredictedStatesAndObservation(IterableDataset):
 
             self.time_step = time_step
             if isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
-                self.model.diffusion_path.set_previous_posterior(predicted_state)
+                self.model.diffusion_path.set_previous_posterior(predicted_state.to(self.dataset.device))
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
             t_now_and_next, next_predicted_state, next_observation = map(
                 lambda x: x.to(self.dataset.device),
