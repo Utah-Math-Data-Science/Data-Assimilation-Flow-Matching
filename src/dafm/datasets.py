@@ -9,6 +9,7 @@ from torch.utils.data.dataset import IterableDataset
 from tqdm import tqdm
 from torchdiffeq import odeint
 import dapper.mods.KS
+import polars
 
 import conf.datasets
 import conf.inflation_scale
@@ -32,37 +33,37 @@ class Dataset:
         if self.store_trajectory_on_cpu:
             device = 'cpu'
 
-        self.data = defaultdict(list)
         time_step_indices, times_from_zero = self.time_steps_and_times(cfg, device)
         times_to_keep = time_step_indices >= self.cfg.time_step_count_drop_first
-        self.data['times'] = times_from_zero[times_to_keep]
-        self.data['true_state'].append(self.initialize_true_state(cfg, device))
+        self.times = times_from_zero[times_to_keep]
+        self.true_state = []
+        self.true_state.append(self.initialize_true_state(cfg, device))
 
         predicted_state_initial_condition_noise = torch.randn((cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
-        true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.data['true_state'][0].shape), device=device) * cfg.model_noise_std
-        observation_noise = torch.randn((self.data['times'].shape[0], *self.observe(self.data['true_state'][0]).shape), device=device) * cfg.observation_noise_std
-        self.predicted_state_noise = torch.randn((self.data['times'][:-1].shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_noise_std
+        true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.true_state[0].shape), device=device) * cfg.model_noise_std
+        observation_noise = torch.randn((self.times.shape[0], *self.observe(self.true_state[0]).shape), device=device) * cfg.observation_noise_std
+        self.predicted_state_noise = torch.randn((self.times[:-1].shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_noise_std
 
         for time_step, t_now_and_next in enumerate(times_from_zero.unfold(0, 2, 1)):
-            true_state = self.data['true_state'][-1]
+            true_state = self.true_state[-1]
             true_state = state_perturbation(time_step, true_state)
-            self.data['true_state'].append(
+            self.true_state.append(
                 self._step_state(time_step, t_now_and_next, true_state, true_state_noise[time_step])
             )
 
-        self.data['true_state'] = rearrange(
-            self.data['true_state'],
+        self.true_state = rearrange(
+            self.true_state,
             't 1 dim -> t 1 dim'
         )
 
-        self.data['true_state'] = self.data['true_state'][times_to_keep]
+        self.true_state = self.true_state[times_to_keep]
 
         predicted_state_initial_condition = predicted_state_initial_condition_noise
         if cfg.predicted_state_initial_condition_add_true_state:
-            predicted_state_initial_condition += self.data['true_state'][0]
-        self.data['predicted_state'].append(predicted_state_initial_condition)
+            predicted_state_initial_condition += self.true_state[0]
+        self.current_predicted_state = predicted_state_initial_condition
 
-        self.data['observation'] = self.observe(self.data['true_state']) + observation_noise
+        self.observation = self.observe(self.true_state) + observation_noise
 
     @staticmethod
     def time_steps_and_times(cfg, device):
@@ -98,9 +99,9 @@ class Dataset:
         return self._step_state(time_step, t_now_and_next, sampled_state, self.predicted_state_noise[time_step])
 
     def __iter__(self):
-        for time_step, t_now_and_next in enumerate(self.data['times'].unfold(0, 2, 1)):
+        for time_step, t_now_and_next in enumerate(self.times.unfold(0, 2, 1)):
             ignore_observation = time_step % self.cfg.observe_every_n_time_steps != 0
-            yield time_step, t_now_and_next, self.data['predicted_state'][time_step], self.data['observation'][time_step + 1], ignore_observation
+            yield time_step, t_now_and_next, self.current_predicted_state, self.observation[time_step + 1], ignore_observation
 
 
 class DoubleWell(Dataset):
@@ -338,11 +339,12 @@ class Simple(Dataset):
 
 
 class PredictedStatesAndObservation(IterableDataset):
-    def __init__(self, dataset, model, logger=None):
+    def __init__(self, dataset, model, logger=None, data_to_save_callback=lambda *_: None):
         self.dataset = dataset
         self.model = model
         self.logger = logger
         self.time_step = None  # set in iter
+        self.data_to_save_callback = data_to_save_callback
 
     def __iter__(self):
         if self.model.cfg.train_on_initial_predicted_state:
@@ -361,13 +363,21 @@ class PredictedStatesAndObservation(IterableDataset):
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_time, sampled_state, next_observation, True
                 if self.dataset.store_trajectory_on_cpu:
                     sampled_state = sampled_state.to('cpu')
-                self.dataset.data['predicted_state'][0] = sampled_state
+                self.dataset.current_predicted_state= sampled_state
+        data_to_save = dict(
+            time_step=[],
+            times=[], predicted_state=[],
+        )
         for time_step, t_now_and_next, predicted_state, next_observation, ignore_observation in tqdm(
            self.dataset,
            total=self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first,
            initial=1,
            desc='Estimating state at time step',
         ):
+            data_to_save['time_step'].append(time_step)
+            data_to_save['times'].append(t_now_and_next[:, 0])
+            data_to_save['predicted_state'].append(predicted_state)
+
             log_time_step_time_start = time.process_time()
 
             self.time_step = time_step
@@ -404,9 +414,7 @@ class PredictedStatesAndObservation(IterableDataset):
                 )
             if self.dataset.store_trajectory_on_cpu:
                 sampled_state = sampled_state.to('cpu')
-            if len(self.dataset.data['predicted_state']) > 0:
-                self.dataset.data['predicted_state'][-1] = self.dataset.data['predicted_state'][-1].to('cpu')
-            self.dataset.data['predicted_state'].append(sampled_state)
+            self.dataset.current_predicted_state = sampled_state
 
             log_time_step_time_end = time.process_time()
             if self.logger is not None:
@@ -414,8 +422,97 @@ class PredictedStatesAndObservation(IterableDataset):
                     time_s=log_time_step_time_end - log_time_step_time_start,
                 ), step=time_step + 1)
 
+            is_last_time_step = time_step == self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first - 1
+            if (
+                self.dataset.cfg.save_data_every_n_time_steps is not None and time_step > 0 and time_step % self.dataset.cfg.save_data_every_n_time_steps == 0
+                or
+                is_last_time_step
+            ):
+                if is_last_time_step:
+                    data_to_save['time_step'].append(time_step + 1)
+                    data_to_save['times'].append(t_now_and_next[:, 1])
+                    data_to_save['predicted_state'].append(sampled_state)
+                    self.data_to_save_callback(time_step + 1, data_to_save)
+                else:
+                    self.data_to_save_callback(time_step, data_to_save)
+
+                data_to_save = dict(
+                    time_step=[],
+                    times=[], predicted_state=[],
+                )
+
         if self.logger is not None:
             self.logger.save()
+
+
+def save_trajectories(cfg, data, save_dir):
+    data['times'] = rearrange(data['times'], 'time_step 1 -> time_step').cpu().numpy()
+    data['times'] = polars.DataFrame(
+        data['times'],
+        schema=['times'],
+        orient='row',
+    )
+    data['predicted_state'] = rearrange(
+        data['predicted_state'],
+        't predicted_state_count dim -> t predicted_state_count dim'
+    )
+    time_step_count_predicted, predicted_state_count, dim = data['predicted_state'].shape
+    if cfg.save_only_mean_std:
+        data['predicted_state_mean'] = reduce(
+            data['predicted_state'],
+            't predicted_state_count dim -> t dim',
+            'mean',
+        )
+        data['predicted_state_std'] = reduce(
+            data['predicted_state'],
+            't predicted_state_count dim -> t dim',
+            torch.std,
+        )
+        for stat in ('mean', 'std'):
+            data[f'predicted_state_{stat}'] = polars.DataFrame(
+                data[f'predicted_state_{stat}'].cpu().numpy(),
+                schema=[
+                    f'predicted_state_{stat}_dim_{d}'
+                    for d in range(dim)
+                ],
+                orient='row',
+            )
+        df = polars.concat([data[k] for k in ('times', 'predicted_state_mean', 'predicted_state_std')], how='horizontal')
+    else:
+        data['true_state'] = rearrange(
+            data['true_state'],
+            't 1 dim -> t dim',
+        )
+        data['observation'] = rearrange(
+            data['observation'],
+            't 1 dim -> t dim',
+        )
+        data['predicted_state'] = rearrange(
+            data['predicted_state'],
+            't predicted_state_count dim -> t (predicted_state_count dim)'
+        )
+        data['predicted_state'] = polars.DataFrame(
+            data['predicted_state'].cpu().numpy(),
+            schema=[
+                f'predicted_state_{state}_dim_{d}'
+                for state in range(predicted_state_count)
+                for d in range(dim)
+            ],
+            orient='row',
+        )
+        data['true_state'] = polars.DataFrame(
+            data['true_state'].cpu().numpy(),
+            schema=[f'true_state_dim_{d}' for d in range(dim)],
+            orient='row',
+        )
+        data['observation'] = polars.DataFrame(
+            data['observation'].cpu().numpy(),
+            schema=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
+            orient='row',
+        )
+        df = polars.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], how='horizontal')
+    df.write_parquet(save_dir)
+    log.info('Trajectory data saved to %s', save_dir)
 
 
 def get_state_perturbation(state_perturbation):

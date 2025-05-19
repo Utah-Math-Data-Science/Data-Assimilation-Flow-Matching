@@ -79,14 +79,21 @@ def main(cfg):
 
     time_step_time_logger = loggers.CSVLogger(cfg.run_dir, name=None, name_metrics_file='time_step_times.csv')
 
-    dataset = datasets.PredictedStatesAndObservation(dynamics, model, logger=time_step_time_logger)
+    dataset = datasets.PredictedStatesAndObservation(
+        dynamics, model,
+        logger=time_step_time_logger,
+        data_to_save_callback=lambda time_step, data_to_save: datasets.save_trajectories(
+            cfg.dataset, data_to_save,
+            cfg.run_dir/f'{cfg.prediction_filename}.{time_step}.parquet'
+        )
+    )
     data_assimilation = DataAssimilation(cfg, dataset, model)
 
     logger = loggers.CSVLogger(cfg.run_dir, name=None)
 
     cbs = [
         callbacks.LogStats(),
-        callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
+        # callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
     ]
     enable_progress_bar = False
     if cfg.model.epoch_count > 0:# or cfg.model.epoch_count_sampling > 0:
