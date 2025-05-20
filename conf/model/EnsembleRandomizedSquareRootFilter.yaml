@@ -1,0 +1,4 @@
+defaults:
+  - _EnsembleRandomizedSquareRootFilter
+  - override inflation_scale: ConstantScale
+  - _self_

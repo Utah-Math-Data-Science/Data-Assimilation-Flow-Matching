@@ -25,7 +25,7 @@ def euler_maruyama(dt, t, x, f, noise):
 
 
 class Dataset:
-    def __init__(self, cfg, observe, state_perturbation, device):
+    def __init__(self, cfg, observe, state_perturbation, device, delete_true_state=False):
         self.cfg = cfg
         self.observe = observe
         self.device = device
@@ -64,6 +64,9 @@ class Dataset:
         self.current_predicted_state = predicted_state_initial_condition
 
         self.observation = self.observe(self.true_state) + observation_noise
+
+        if delete_true_state:
+            self.true_state = None
 
     @staticmethod
     def time_steps_and_times(cfg, device):
@@ -257,12 +260,12 @@ class NavierStokes(Dataset):
 
 
 class KuramotoSivashinsky(Dataset):
-    def __init__(self, cfg, observe, state_perturbation, device):
+    def __init__(self, cfg, observe, state_perturbation, device, delete_true_state=False):
         self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
         if self.store_trajectory_on_cpu:
             device = 'cpu'
         self.solve = self.etd_rk4_wrapper(cfg, device)
-        super().__init__(cfg, observe, state_perturbation, device)
+        super().__init__(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
 
     def initialize_true_state(self, cfg, device):
         x0 = torch.tensor(dapper.mods.KS.Model(
@@ -375,13 +378,13 @@ class PredictedStatesAndObservation(IterableDataset):
            desc='Estimating state at time step',
         ):
             data_to_save['time_step'].append(time_step)
-            data_to_save['times'].append(t_now_and_next[:, 0])
-            data_to_save['predicted_state'].append(predicted_state)
+            data_to_save['times'].append(t_now_and_next[:, 0].cpu())
+            data_to_save['predicted_state'].append(predicted_state.cpu())
 
             log_time_step_time_start = time.process_time()
 
             self.time_step = time_step
-            if isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
+            if hasattr(self.model.cfg, 'diffusion_path') and isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
                 self.model.diffusion_path.set_previous_posterior(predicted_state.to(self.dataset.device))
             next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
             t_now_and_next, next_predicted_state, next_observation = map(
@@ -430,8 +433,8 @@ class PredictedStatesAndObservation(IterableDataset):
             ):
                 if is_last_time_step:
                     data_to_save['time_step'].append(time_step + 1)
-                    data_to_save['times'].append(t_now_and_next[:, 1])
-                    data_to_save['predicted_state'].append(sampled_state)
+                    data_to_save['times'].append(t_now_and_next[:, 1].cpu())
+                    data_to_save['predicted_state'].append(sampled_state.cpu())
                     self.data_to_save_callback(time_step + 1, data_to_save)
                 else:
                     self.data_to_save_callback(time_step, data_to_save)
@@ -534,20 +537,20 @@ def get_state_perturbation(state_perturbation):
         raise ValueError(f'Unknown state perturbation: {state_perturbation}')
 
 
-def get_dynamics_dataset(cfg, device):
+def get_dynamics_dataset(cfg, device, delete_true_state=False):
     observe = dafm.observe.get_observe(cfg)
     state_perturbation = get_state_perturbation(cfg.state_perturbation)
     if isinstance(cfg, conf.datasets.DoubleWell):
-        return DoubleWell(cfg, observe, state_perturbation, device)
+        return DoubleWell(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.Lorenz63):
-        return Lorenz63(cfg, observe, state_perturbation, device)
+        return Lorenz63(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.Lorenz96):
-        return Lorenz96(cfg, observe, state_perturbation, device)
+        return Lorenz96(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.NavierStokes):
-        return NavierStokes(cfg, observe, state_perturbation, device)
+        return NavierStokes(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.KuramotoSivashinsky):
-        return KuramotoSivashinsky(cfg, observe, state_perturbation, device)
+        return KuramotoSivashinsky(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.Simple):
-        return Simple(cfg, observe, state_perturbation, device)
+        return Simple(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

@@ -29,7 +29,7 @@ class Dataset(orm.InheritableTable):
         '_self_',
     ])
     trajectory_stored_on_gpu_max_state_dimension: int = field(default=200000)
-    save_data_every_n_time_steps: Optional[int] = field(default=10)
+    save_data_every_n_time_steps: Optional[int] = field(default=None)
 
     state_dimension: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)
 

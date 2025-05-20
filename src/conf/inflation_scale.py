@@ -11,4 +11,4 @@ class NoScaling(InflationScale):
 
 
 class ConstantScale(InflationScale):
-    constant: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1)
+    constant: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1.)

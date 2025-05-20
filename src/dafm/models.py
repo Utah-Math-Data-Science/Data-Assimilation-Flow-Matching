@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, cache
 import logging
 
 import numpy as np
@@ -11,7 +11,7 @@ import conf.diffusion_path
 import conf.inflation_scale
 import dafm.diffusion_path
 import dafm.inflation_scale
-from dafm import flow_matching_guidance, utils
+from dafm import flow_matching_guidance, models_classical, utils
 
 
 log = logging.getLogger(__file__)
@@ -663,6 +663,105 @@ class FlowMatchingGaussianTarget(nn.Module):
             yield done, time_step, time, xt
 
 
+class Classical(nn.Module):
+    def __init__(self, cfg, observation_noise_std, inflation_scale):
+        super().__init__()
+        self.cfg = cfg
+        self.observation_noise_std = observation_noise_std
+        self.inflation_scale = inflation_scale
+
+    @staticmethod
+    @cache
+    def coords(dimension, device=None):
+        return torch.arange(dimension, device=device).unsqueeze(1)
+
+    @staticmethod
+    @cache
+    def domain_lengths(dimension, device=None):
+        return torch.tensor([dimension], device=device)
+
+    @staticmethod
+    @cache
+    def L_thing(coords_a, coords_b, loc_radius_gc, domain_lengths=None):
+        return models_classical.gaspari_cohn_correlation(
+            models_classical.pairwise_distances_torch(coords_a, coords_b, domain_lengths=domain_lengths),
+            loc_radius_gc
+        )
+
+
+class BootstrapParticleFilter(Classical):
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        sampled_state = models_classical.bootstrap_particle_filter_analysis(
+            particles_forecast=data,
+            observation_y=observation,
+            observation_operator=observe,
+            sigma_y=self.observation_noise_std,
+            # resampling_method="multinomial",
+        )
+        yield True, 0, None, sampled_state
+
+
+class EnsembleKalmanFilterPerturbedObservations(Classical):
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        coords_state = self.coords(data.shape[1], device=data.device)
+        coords_observation = self.coords(observation.shape[1], device=data.device)
+        domain_lengths = self.domain_lengths(data.shape[1], device=data.device)
+        sampled_state = models_classical.ensemble_kalman_filter_analysis(
+            ensemble_f=data,
+            observation_y=observation,
+            observation_operator_ens=observe,
+            sigma_y=self.observation_noise_std,
+            method="EnKF-PertObs",
+            localization_matrix_Lxy=self.L_thing(
+                coords_state, coords_observation, self.cfg.loc_radius_gc,
+                domain_lengths=domain_lengths,
+            ),
+            localization_matrix_Lyy=self.L_thing(
+                coords_observation, coords_observation, self.cfg.loc_radius_gc,
+                domain_lengths=domain_lengths,
+            ),
+            do_inflation=False,  # inflation is done in src/datasets.py
+        )[0].squeeze(0)
+        yield True, 0, None, sampled_state
+
+
+class EnsembleRandomizedSquareRootFilter(Classical):
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        sampled_state = models_classical.ensemble_kalman_filter_analysis(
+            ensemble_f=data,
+            observation_y=observation,
+            observation_operator_ens=observe,
+            sigma_y=self.observation_noise_std,
+            method='ERSF',
+            do_inflation=False,  # inflation is done in src/datasets.py
+        )[0].squeeze(0)
+        yield True, 0, None, sampled_state
+
+
+class LocalEnsembleTransformKalmanFilter(Classical):
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        coords_state = self.coords(data.shape[1], device=data.device)
+        coords_observation = self.coords(observation.shape[1], device=data.device)
+        domain_lengths = self.domain_lengths(data.shape[1], device=data.device)
+        sampled_state = models_classical.ensemble_kalman_filter_analysis(
+            ensemble_f=data,
+            observation_y=observation,
+            observation_operator_ens=observe,
+            sigma_y=self.observation_noise_std,
+            method='LETKF',
+            localization_radius_letkf=self.cfg.loc_radius_gc,
+            coords_state_letkf=coords_state,
+            coords_obs_letkf=coords_observation,
+            domain_lengths_letkf=domain_lengths,
+            do_inflation=False,  # inflation is done in src/datasets.py
+        )[0].squeeze(0)
+        yield True, 0, None, sampled_state
+
+
 def get_model(cfg, state_dimension, observation_noise_std):
     inflation_scale = dafm.inflation_scale.get_inflation_scale(cfg.inflation_scale)
     if isinstance(cfg, conf.models.ScoreMatching):
@@ -683,5 +782,13 @@ def get_model(cfg, state_dimension, observation_noise_std):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=True)
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
         return FlowMatchingGaussianTarget(cfg, observation_noise_std, diffusion_path, inflation_scale, guidance)
+    elif isinstance(cfg, conf.models.BootstrapParticleFilter):
+        return BootstrapParticleFilter(cfg, observation_noise_std, inflation_scale)
+    elif isinstance(cfg, conf.models.EnsembleKalmanFilterPerturbedObservations):
+        return EnsembleKalmanFilterPerturbedObservations(cfg, observation_noise_std, inflation_scale)
+    elif isinstance(cfg, conf.models.EnsembleRandomizedSquareRootFilter):
+        return EnsembleRandomizedSquareRootFilter(cfg, observation_noise_std, inflation_scale)
+    elif isinstance(cfg, conf.models.LocalEnsembleTransformKalmanFilter):
+        return LocalEnsembleTransformKalmanFilter(cfg, observation_noise_std, inflation_scale)
     else:
         raise ValueError(f'Unknown model: {cfg}')

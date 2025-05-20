@@ -202,3 +202,34 @@ class FlowMatchingGaussianTarget(Model):
                     'The local approximation of the flow matching guidance is only valid for affine conditional probability paths.'
                     f' Please use an affine conditional probability path (e.g., set model/diffusion_path=ConditionalOptimalTransport) instead of {self.diffusion_path.__class__.__name__}.'
                 )
+
+
+class BootstrapParticleFilter(Model):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
+
+
+class EnsembleKalmanFilterPerturbedObservations(Model):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
+    loc_radius_gc: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5.)  # Effective radius for Gaspari-Cohn like localization
+
+
+class EnsembleRandomizedSquareRootFilter(Model):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
+    loc_radius_gc: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5.)  # Effective radius for Gaspari-Cohn like localization
+
+
+class LocalEnsembleTransformKalmanFilter(Model):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
+    loc_radius_gc: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5.)  # Effective radius for Gaspari-Cohn like localization

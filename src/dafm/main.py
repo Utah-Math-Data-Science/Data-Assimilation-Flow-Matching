@@ -73,7 +73,7 @@ def main(cfg):
 
     pl.seed_everything(cfg.rng_seed)
     with pl.utilities.seed.isolate_rng():
-        dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device)
+        dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device, delete_true_state=True)
     with pl.utilities.seed.isolate_rng():
         model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_noise_std)
 
@@ -84,7 +84,7 @@ def main(cfg):
         logger=time_step_time_logger,
         data_to_save_callback=lambda time_step, data_to_save: datasets.save_trajectories(
             cfg.dataset, data_to_save,
-            cfg.run_dir/f'{cfg.prediction_filename}.{time_step}.parquet'
+            cfg.run_dir/(f'{cfg.prediction_filename}.{time_step}.parquet' if cfg.dataset.save_data_every_n_time_steps is not None else f'{cfg.prediction_filename}.parquet')
         )
     )
     data_assimilation = DataAssimilation(cfg, dataset, model)
