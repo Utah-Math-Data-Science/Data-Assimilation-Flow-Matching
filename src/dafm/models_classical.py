@@ -75,6 +75,7 @@ def gaspari_cohn_correlation(distances, c_radius):
     Returns:
         torch.Tensor: Tensor of correlation coefficients.
     """
+    c_radius = c_radius * 1.82  # following the DAPPER python package
     coeffs = torch.zeros_like(distances)
     # d_prime = distances / c_radius
 
