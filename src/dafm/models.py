@@ -694,10 +694,10 @@ class BootstrapParticleFilter(Classical):
     def sampling_steps(self, data, observation, observe, time_step_count=None):
         sampled_state = models_classical.bootstrap_particle_filter_analysis(
             particles_forecast=data,
-            observation_y=observation,
+            observation_y=rearrange(observation, '1 dim -> dim'),
             observation_operator=observe,
             sigma_y=self.observation_noise_std,
-            # resampling_method="multinomial",
+            resampling_method="multinomial",
         )
         yield True, 0, None, sampled_state
 
