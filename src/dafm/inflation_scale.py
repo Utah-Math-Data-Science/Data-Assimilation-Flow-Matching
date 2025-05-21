@@ -5,7 +5,7 @@ class InflationScale:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    def forward(self, distance):
+    def forward(self, sampled_state_centered):
         raise NotImplementedError()
 
     def __call__(self, *args, **kwargs):
@@ -17,7 +17,7 @@ class NoScaling(InflationScale):
 
 
 class ConstantScale(InflationScale):
-    def forward(self, distance):
+    def forward(self, sampled_state_centered):
         return self.cfg.constant
 
 
