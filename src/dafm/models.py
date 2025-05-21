@@ -710,7 +710,7 @@ class EnsembleKalmanFilterPerturbedObservations(Classical):
         domain_lengths = self.domain_lengths(data.shape[1], device=data.device)
         sampled_state = models_classical.ensemble_kalman_filter_analysis(
             ensemble_f=data,
-            observation_y=observation,
+            observation_y=rearrange(observation, '1 dim -> dim'),
             observation_operator_ens=observe,
             sigma_y=self.observation_noise_std,
             method="EnKF-PertObs",
@@ -723,7 +723,7 @@ class EnsembleKalmanFilterPerturbedObservations(Classical):
                 domain_lengths=domain_lengths,
             ),
             do_inflation=False,  # inflation is done in src/datasets.py
-        )[0].squeeze(0)
+        )[0]
         yield True, 0, None, sampled_state
 
 
@@ -732,24 +732,24 @@ class EnsembleRandomizedSquareRootFilter(Classical):
     def sampling_steps(self, data, observation, observe, time_step_count=None):
         sampled_state = models_classical.ensemble_kalman_filter_analysis(
             ensemble_f=data,
-            observation_y=observation,
+            observation_y=rearrange(observation, '1 dim -> dim'),
             observation_operator_ens=observe,
             sigma_y=self.observation_noise_std,
             method='ERSF',
             do_inflation=False,  # inflation is done in src/datasets.py
-        )[0].squeeze(0)
+        )[0]
         yield True, 0, None, sampled_state
 
 
 class LocalEnsembleTransformKalmanFilter(Classical):
     @torch.no_grad
     def sampling_steps(self, data, observation, observe, time_step_count=None):
-        coords_state = self.coords(data.shape[1], device=data.device)
-        coords_observation = self.coords(observation.shape[1], device=data.device)
-        domain_lengths = self.domain_lengths(data.shape[1], device=data.device)
+        coords_state = self.coords(data.shape[1], device=data.device, dtype=data.dtype)
+        coords_observation = self.coords(observation.shape[1], device=data.device, dtype=data.dtype)
+        domain_lengths = self.domain_lengths(data.shape[1], device=data.device, dtype=data.dtype)
         sampled_state = models_classical.ensemble_kalman_filter_analysis(
             ensemble_f=data,
-            observation_y=observation,
+            observation_y=rearrange(observation, '1 dim -> dim'),
             observation_operator_ens=observe,
             sigma_y=self.observation_noise_std,
             method='LETKF',
@@ -758,7 +758,8 @@ class LocalEnsembleTransformKalmanFilter(Classical):
             coords_obs_letkf=coords_observation,
             domain_lengths_letkf=domain_lengths,
             do_inflation=False,  # inflation is done in src/datasets.py
-        )[0].squeeze(0)
+            inflation_factor=self.cfg.inflation_scale.constant,
+        )[0]
         yield True, 0, None, sampled_state
 
 
