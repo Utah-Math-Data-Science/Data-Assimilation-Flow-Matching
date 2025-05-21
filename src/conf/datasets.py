@@ -103,3 +103,4 @@ class NavierStokes(Dataset):
 
 class KuramotoSivashinsky(Dataset):
     domain_pi_multiple: float = orm.make_field(orm.ColumnRequired(sa.Double), default=128)
+    floating_point_precision: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=32)

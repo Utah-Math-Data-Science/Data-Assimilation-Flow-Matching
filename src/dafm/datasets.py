@@ -261,7 +261,12 @@ class NavierStokes(Dataset):
 
 class KuramotoSivashinsky(Dataset):
     def __init__(self, cfg, observe, state_perturbation, device, delete_true_state=False):
-        self.dtype = torch.float32
+        if cfg.floating_point_precision == 64:
+            self.dtype = torch.float64
+        elif cfg.floating_point_precision == 32:
+            self.dtype = torch.float32
+        else:
+            raise ValueError(f'Unknown floating point precision (should be 32 or 64): {self.cfg.floating_point_precision}')
         self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
         if self.store_trajectory_on_cpu:
             device = 'cpu'
