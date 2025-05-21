@@ -17,3 +17,5 @@ time_step_size: .25
 observe_every_n_time_steps: 4
 
 integrator: RUNGE_KUTTA_4  # not true, but this setting enforces that model noise is zero
+
+domain_pi_multiple: 16

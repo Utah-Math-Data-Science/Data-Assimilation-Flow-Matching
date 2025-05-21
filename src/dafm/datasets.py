@@ -155,8 +155,8 @@ class NavierStokes(Dataset):
 
         horizontal_grid, vertical_grid = torch.meshgrid(horizontal_axis, vertical_axis, indexing='ij')
 
-        horizontal_velocity = self.sample_squared_exponential_gaussian_process(cfg, device)
-        vertical_velocity = self.sample_squared_exponential_gaussian_process(cfg, device)
+        horizontal_velocity = self.sample_squared_exponential_gaussian_process(cfg, device, horizontal_grid.dtype)
+        vertical_velocity = self.sample_squared_exponential_gaussian_process(cfg, device, horizontal_grid.dtype)
         b0 = self.divergence(horizontal_velocity, vertical_velocity) / cfg.time_step_size
         pressure = torch.zeros((cfg.grid_horizontal_count, cfg.grid_vertical_count), device=device)
         pressure  = self.pressure_poisson(pressure, b0)
@@ -174,7 +174,7 @@ class NavierStokes(Dataset):
 
         return x
 
-    def sample_squared_exponential_gaussian_process(self, cfg, device):
+    def sample_squared_exponential_gaussian_process(self, cfg, device, dtype):
         w = np.random.randn(cfg.grid_horizontal_count, cfg.grid_vertical_count)
         w_hat = np.fft.fft2(w)
         kx = np.fft.fftfreq(cfg.grid_horizontal_count, d=self.grid_horizontal_spacing)
@@ -183,7 +183,7 @@ class NavierStokes(Dataset):
         S = np.exp(-2 * np.pi**2 * cfg.gaussian_process_length_scale**2 * (KX**2 + KY**2))
         f = np.fft.ifft2(w_hat * np.sqrt(S)).real
         out = cfg.gaussian_process_std * (f - f.mean()) / f.std()
-        return torch.tensor(out, device=device)
+        return torch.tensor(out, device=device, dtype=dtype)
 
     def _step_state(self, time_step, t_now_and_next, state, model_noise):
         """
@@ -261,6 +261,7 @@ class NavierStokes(Dataset):
 
 class KuramotoSivashinsky(Dataset):
     def __init__(self, cfg, observe, state_perturbation, device, delete_true_state=False):
+        self.dtype = torch.float32
         self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
         if self.store_trajectory_on_cpu:
             device = 'cpu'
@@ -272,7 +273,7 @@ class KuramotoSivashinsky(Dataset):
             dt=cfg.time_step_size,
             DL=cfg.domain_pi_multiple,
             Nx=cfg.state_dimension,
-        ).x0, device=device)
+        ).x0, device=device, dtype=self.dtype)
         x0 = rearrange(x0, 'state_dimension -> 1 state_dimension')
         return x0 + torch.randn_like(x0)
 
@@ -293,8 +294,8 @@ class KuramotoSivashinsky(Dataset):
         L = kk ** 2 - kk ** 4  # Linear operator for K-S eqn: F[ - u_xx - u_xxxx]
 
         # Precompute ETDRK4 scalar quantities
-        E = torch.tensor(np.exp(h * L), device=device).unsqueeze(0)  # Integrating factor, eval at dt
-        E2 = torch.tensor(np.exp(h * L / 2), device=device).unsqueeze(0)  # Integrating factor, eval at dt/2
+        E = torch.tensor(np.exp(h * L), device=device, dtype=self.dtype).unsqueeze(0)  # Integrating factor, eval at dt
+        E2 = torch.tensor(np.exp(h * L / 2), device=device, dtype=self.dtype).unsqueeze(0)  # Integrating factor, eval at dt/2
 
         # Roots of unity are used to discretize a circular contour...
         nRoots = 16
@@ -309,7 +310,7 @@ class KuramotoSivashinsky(Dataset):
         f2 = torch.tensor(h * ((2 + CL + np.exp(CL) * (-2 + CL)) / CL ** 3).mean(axis=-1).real, device=device).unsqueeze(0)
         f3 = torch.tensor(h * ((-4 - 3 * CL - CL ** 2 + np.exp(CL) * (4 - CL)) / CL ** 3).mean(axis=-1).real, device=device).unsqueeze(0)
 
-        D = 1j * torch.tensor(kk, device=device)  # Differentiation to compute:  F[ u_x ]
+        D = 1j * torch.tensor(kk, device=device, dtype=self.dtype)  # Differentiation to compute:  F[ u_x ]
 
         def NL(v):
             return -.5 * D * torch.fft.rfft(torch.fft.irfft(v, dim=-1) ** 2, dim=-1)
