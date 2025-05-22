@@ -672,13 +672,13 @@ class Classical(nn.Module):
 
     @staticmethod
     @cache
-    def coords(dimension, device=None):
-        return torch.arange(dimension, device=device).unsqueeze(1)
+    def coords(dimension, device=None, dtype=None):
+        return torch.arange(dimension, device=device, dtype=dtype).unsqueeze(1)
 
     @staticmethod
     @cache
-    def domain_lengths(dimension, device=None):
-        return torch.tensor([dimension], device=device)
+    def domain_lengths(dimension, device=None, dtype=None):
+        return torch.tensor([dimension], device=device, dtype=dtype)
 
     @staticmethod
     @cache
