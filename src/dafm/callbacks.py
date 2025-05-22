@@ -46,8 +46,9 @@ class LogStats(pl.callbacks.Callback):
 
 
 class SaveTrajectories(pl.callbacks.Callback):
-    def __init__(self, save_path):
-        self.save_path = save_path
+    def __init__(self, save_dir, prediction_filename):
+        self.save_dir = save_dir
+        self.prediction_filename = prediction_filename
 
     def on_train_epoch_start(self, trainer, pl_module):
         self.log('predicted_state_mean', reduce(
@@ -59,72 +60,6 @@ class SaveTrajectories(pl.callbacks.Callback):
         self.on_train_end(trainer, pl_module)
 
     def on_train_end(self, trainer, pl_module):
-        data = pl_module.dataset.dataset.data.copy()
-        data['predicted_state'][-1] = data['predicted_state'][-1].to('cpu')
-        data['predicted_state'] = rearrange(
-            data['predicted_state'],
-            't predicted_state_count dim -> t predicted_state_count dim'
-        )
-        time_step_count = data['times'].shape[0]
-        data['times'] = polars.DataFrame(
-            data['times'].cpu().numpy(),
-            schema=['times'],
-            orient='row',
-        )
-        time_step_count_predicted, predicted_state_count, dim = data['predicted_state'].shape
-        if pl_module.dataset.dataset.cfg.save_only_mean_std:
-            data['predicted_state_mean'] = reduce(
-                data['predicted_state'],
-                't predicted_state_count dim -> t dim',
-                'mean',
-            )
-            data['predicted_state_std'] = reduce(
-                data['predicted_state'],
-                't predicted_state_count dim -> t dim',
-                torch.std,
-            )
-            for stat in ('mean', 'std'):
-                data[f'predicted_state_{stat}'] = polars.DataFrame(
-                    data[f'predicted_state_{stat}'].cpu().numpy(),
-                    schema=[
-                        f'predicted_state_{stat}_dim_{d}'
-                        for d in range(dim)
-                    ],
-                    orient='row',
-                )
-            df = polars.concat([data[k] for k in ('times', 'predicted_state_mean', 'predicted_state_std')], how='horizontal')
-        else:
-            data['true_state'] = rearrange(
-                data['true_state'],
-                't 1 dim -> t dim',
-            )
-            data['observation'] = rearrange(
-                data['observation'],
-                't 1 dim -> t dim',
-            )
-            data['predicted_state'] = rearrange(
-                data['predicted_state'],
-                't predicted_state_count dim -> t (predicted_state_count dim)'
-            )
-            data['predicted_state'] = polars.DataFrame(
-                data['predicted_state'].cpu().numpy(),
-                schema=[
-                    f'predicted_state_{state}_dim_{d}'
-                    for state in range(predicted_state_count)
-                    for d in range(dim)
-                ],
-                orient='row',
-            )
-            data['true_state'] = polars.DataFrame(
-                data['true_state'].cpu().numpy(),
-                schema=[f'true_state_dim_{d}' for d in range(dim)],
-                orient='row',
-            )
-            data['observation'] = polars.DataFrame(
-                data['observation'].cpu().numpy(),
-                schema=[f'observation_dim_{d}' for d in range(data['observation'].shape[1])],
-                orient='row',
-            )
-            df = polars.concat([data[k] for k in ('times', 'true_state', 'observation', 'predicted_state')], how='horizontal')
-        df.write_parquet(self.save_path)
-        log.info('Trajectory data saved to %s', self.save_path)
+        df = polars.scan_parquet(self.save_dir/f'{self.prediction_filename}.*.parquet')
+        df.write_parquet(self.save_dir)
+        log.info('Trajectory data saved to %s', self.save_dir)

@@ -93,7 +93,7 @@ def main(cfg):
 
     cbs = [
         callbacks.LogStats(),
-        # callbacks.SaveTrajectories(cfg.run_dir/cfg.prediction_filename),
+        # callbacks.SaveTrajectories(cfg.run_dir, cfg.prediction_filename),
     ]
     enable_progress_bar = False
     if cfg.model.epoch_count > 0:# or cfg.model.epoch_count_sampling > 0:
