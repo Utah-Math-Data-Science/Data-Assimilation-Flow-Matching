@@ -6,10 +6,33 @@
             "type": "python",
             "request": "launch",
             "name": "Launch main",
-            "program": "/root/workspace/GitHub/Data-Assimilation-Flow-Matching/src/dafm/main.py",
+            "program": "/home/sci/ttransue/GitHub/Data-Assimilation-Flow-Matching/src/dafm/main.py",
             "args": [
-                "model=FlowMatching",
-                "dataset=DoubleWell"
+                "dataset=NavierStokesDim256",
+                "model=EnsembleKalmanFilterPerturbedObservationsNavierStokes"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "${input:gpu}"
+            }
+        },
+        {
+            "type": "python",
+            "request": "launch",
+            "name": "Launch baselines",
+            "program": "/home/sci/ttransue/GitHub/Data-Assimilation-Flow-Matching/src/dafm/baselines.py",
+            "args": [
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "${input:gpu}"
+            }
+        },
+        {
+            "type": "python",
+            "request": "launch",
+            "name": "Pytest",
+            "program": "/home/sci/ttransue/GitHub/Data-Assimilation-Flow-Matching/.venv/bin/pytest",
+            "args": [
+                "../../tests/test_datasets.py"
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "${input:gpu}"
