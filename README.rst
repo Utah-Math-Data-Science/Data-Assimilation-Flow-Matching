@@ -26,15 +26,15 @@ Installation
 
    .. code:: bash
 
-      python -c 'import dafm'
+      pytest tests
 
-#. Edit the ``out_dir`` field of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the model training output to be saved.
+#. Edit the ``out_dir`` and ``runs_subdir`` fields of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the model training output to be saved.
 
 Supplementary Documentation
 ===========================
 
 * `Hydra <https://hydra.cc/docs/1.3/intro/>`_: Command-line inferface configuration library for configuring the experiments in this project.
-* `Hydra ORM <https://github.com/reepoi/hydra-orm>`_: My library for saving experiment configurations to an `SQLite <https://sqlite.org/>`_ database.
+* `Hydra ORM <https://github.com/reepoi/hydra-orm>`_: Library for saving experiment configurations to an `SQLite <https://sqlite.org/>`_ database.
 * `PyTorch <https://pytorch.org/docs/2.4/index.html>`_: Library for implementing the models.
 * `PyTorch Lightning <https://lightning.ai/docs/pytorch/2.5.0/>`_: Library for handling model training.
 
@@ -54,33 +54,50 @@ where:
    * ``DoubleWell``: One-dimensional potential well system from [Bao2024a]_.
    * ``Lorenz63``: Three-dimensional chaotic butterfly attractor system.
    * ``Lorenz96Bao2024ML``: :math:`N`-dimensional chaotic system with parameters from [Bao2024a]_.
+   * ``Lorenz96Bao2024EnSF``: :math:`N`-dimensional chaotic system with parameters from [Bao2024b]_.
    * ``Lorenz96H100``: `Lorenz96` with a set of parameters with difficulty rating `H100`.
    * ``Lorenz96H200``: `Lorenz96` with a set of parameters with difficulty rating `H200`.
    * ``Lorenz96H300``: `Lorenz96` with a set of parameters with difficulty rating `H300`.
 
 * ``<model>`` is one of:
 
-   * ``ScoreMatching``: The score matching filter described in [Bao2024a]_.
+   * ``ScoreMatching``: The score matching filter described in [Bao2024a]_ and trains a model every time step.
 
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``ScoreMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``ScoreMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``ScoreMatchingMarginal*``: The score matching filter described in [Bao2024b]_.
+   * ``ScoreMatchingMarginal*``: EnSF described in [Bao2024b]_.
 
       * Variants available: ``ScoreMatchingMarginalBao2024EnSF``
 
-   * ``FlowMatching``: Our flow matching filter that requires training.
+   * ``FlowMatching``: Our flow matching filter that trains a model every time step.
 
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``FlowMatchingMarginal*``: Our flow matching filter that approximates the flow matching vector field using a Monte Carlo approximation.
+   * ``FlowMatchingMarginal*``: Our EnFF that approximates the flow matching vector field using a Monte Carlo approximation.
 
       * Variants available: ``FlowMatchingMarginalConditionalOptimalTransport``
 
    * ``FlowMatchingGaussianTarget*``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
 
       * Variants available: ``FlowMatchingGaussianTargetConditionalOptimalTransport``
+
+   * ``BootstrapParticleFilter``
+
+      * Variants available: ``BootstrapParticleFilterKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``BootstrapParticleFilterNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
+
+   * ``EnsembleKalmanFilterPerturbedObservations``
+
+      * Variants available: ``EnsembleKalmanFilterPerturbedObservationsKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``EnsembleKalmanFilterPerturbedObservationsNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
+
+   * ``EnsembleRandomizedSquareRootFilter``: Known as the Ensemble Square Root Filter.
+
+      * Variants available: ``EnsembleRandomizedSquareRootFilterKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``EnsembleRandomizedSquareRootFilterNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
+
+   * ``LocalEnsembleTransformKalmanFilter``
+
+      * Variants available: ``LocalEnsembleTransformKalmanFilterKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``LocalEnsembleTransformKalmanFilterNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
 
 * ``<other_overrides>...``: Other overrides for the model.
    Add the flag ``-c job`` to the Python command see what can be overridden from the command line.
