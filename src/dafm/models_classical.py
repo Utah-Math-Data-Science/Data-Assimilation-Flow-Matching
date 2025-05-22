@@ -1,6 +1,7 @@
 import torch
 import math
 import time # For timing analysis steps
+from tqdm import tqdm
 # import matplotlib.pyplot as plt # Uncomment for plotting GC test or RMSEs
 
 # ##############################################################################
@@ -433,9 +434,9 @@ if __name__ == '__main__':
     dtype = torch.float32
     print(f"Using device: {device}, dtype: {dtype}")
 
-    D_L96 = 500; F_L96_const = 8.0; dt_rk4 = 0.03 # Renamed F_L96 to F_L96_const
-    num_rk4_steps_between_analyses = 5; dt_analysis = dt_rk4 * num_rk4_steps_between_analyses
-    N_ensemble = 40; sigma_d_val = 0; sigma_y_val = 0.4; inflation_val = 1.1
+    D_L96 = 100; F_L96_const = 8.0; dt_rk4 = 0.01 # Renamed F_L96 to F_L96_const
+    num_rk4_steps_between_analyses = 10; dt_analysis = dt_rk4 * num_rk4_steps_between_analyses
+    N_ensemble = 20; sigma_d_val = 0; sigma_y_val = 0.05; inflation_val = 1.1
 
     d_obs_l96 = D_L96
     # H_matrix_l96 = torch.eye(d_obs_l96, D_L96, device=device, dtype=dtype)
@@ -443,15 +444,15 @@ if __name__ == '__main__':
     def obs_op_l96_particle(x_curr): return torch.arctan(x_curr)
     def obs_op_l96_ensemble(ensemble_curr): return torch.arctan(ensemble_curr)
 
-    true_state_t = torch.rand(D_L96, device=device, dtype=dtype) * 2.0 + F_L96_const - 1.0
-    print("Spinning up true state...")
-    for _ in range(200): # Spin-up iterations
+    true_state_t = torch.rand(D_L96, device=device, dtype=dtype) * 3.
+    # print("Spinning up true state...")
+    for _ in tqdm(range(100), desc="Spinning up true state..."): # Spin-up iterations
         for _ in range(num_rk4_steps_between_analyses): # RK4 steps per assimilation cycle for spinup
             true_state_t = rk4_step(lorenz96_rhs, true_state_t, dt_rk4, F_L96_const)
     print("True state spin-up complete.")
 
-    initial_ensemble = true_state_t.unsqueeze(0) + \
-                       torch.randn(N_ensemble, D_L96, device=device, dtype=dtype) * 0.5
+    # initial_ensemble = true_state_t.unsqueeze(0) + torch.randn(N_ensemble, D_L96, device=device, dtype=dtype) * 0.5
+    initial_ensemble = torch.randn(N_ensemble, D_L96, device=device, dtype=dtype) * 1.
     current_particles_bpf = initial_ensemble.clone()
     current_ensemble_enkf_po = initial_ensemble.clone()
     current_ensemble_ersf = initial_ensemble.clone()
@@ -460,7 +461,7 @@ if __name__ == '__main__':
     coords_state_l96 = torch.arange(D_L96, device=device, dtype=dtype).unsqueeze(1)
     coords_obs_l96 = torch.arange(d_obs_l96, device=device, dtype=dtype).unsqueeze(1)
     domain_lengths_l96 = torch.tensor([D_L96], device=device, dtype=dtype)
-    loc_radius_gc = 5.0
+    loc_radius_gc = 3.
     Lxy_l96 = gaspari_cohn_correlation(
         pairwise_distances_torch(coords_state_l96, coords_obs_l96, domain_lengths=domain_lengths_l96), loc_radius_gc)
     Lyy_l96 = gaspari_cohn_correlation(
@@ -471,7 +472,7 @@ if __name__ == '__main__':
     results_rmse = {"BPF": [], "EnKF-PO": [], "ERSF": [], "LETKF": []}
     analysis_times = {"BPF": [], "EnKF-PO": [], "ERSF": [], "LETKF": []} # For storing analysis times
 
-    for cycle in range(num_analysis_cycles):
+    for cycle in tqdm(range(num_analysis_cycles), desc='Analysis'):
         # 1. Forecast Period (True State)
         for _ in range(num_rk4_steps_between_analyses):
             true_state_t = rk4_step(lorenz96_rhs, true_state_t, dt_rk4, F_L96_const)
@@ -482,9 +483,9 @@ if __name__ == '__main__':
 
         # 3. Forecast Period (Ensembles/Particles) + Add Model Error
         ensembles_to_forecast = {
-            "BPF": current_particles_bpf,
-            "EnKF-PO": current_ensemble_enkf_po,
-            "ERSF": current_ensemble_ersf,
+            # "BPF": current_particles_bpf,
+            # "EnKF-PO": current_ensemble_enkf_po,
+            # "ERSF": current_ensemble_ersf,
             "LETKF": current_ensemble_letkf
         }
         forecast_inputs = {}
@@ -501,43 +502,43 @@ if __name__ == '__main__':
 
         # 4. Analysis Step for each method (with timing)
         # BPF
-        start_time = time.perf_counter()
-        current_particles_bpf = bootstrap_particle_filter_analysis(
-            forecast_inputs["BPF"], observation_y_t,
-            obs_op_l96_particle,
-            sigma_y_val
-        )
-        end_time = time.perf_counter()
-        analysis_times["BPF"].append(end_time - start_time)
-        results_rmse["BPF"].append(torch.sqrt(torch.mean((current_particles_bpf.mean(dim=0) - true_state_t)**2)).item())
+        # start_time = time.perf_counter()
+        # current_particles_bpf = bootstrap_particle_filter_analysis(
+        #     forecast_inputs["BPF"], observation_y_t,
+        #     obs_op_l96_particle,
+        #     sigma_y_val
+        # )
+        # end_time = time.perf_counter()
+        # analysis_times["BPF"].append(end_time - start_time)
+        # results_rmse["BPF"].append(torch.sqrt(torch.mean((current_particles_bpf.mean(dim=0) - true_state_t)**2)).item())
 
         # EnKF-PertObs
-        start_time = time.perf_counter()
-        current_ensemble_enkf_po, _ = ensemble_kalman_filter_analysis(
-            forecast_inputs["EnKF-PO"], observation_y_t,
-            obs_op_l96_ensemble,
-            sigma_y_val,
-            method="EnKF-PertObs",
-            inflation_factor=inflation_val,
-            localization_matrix_Lxy=Lxy_l96,
-            localization_matrix_Lyy=Lyy_l96
-        )
-        end_time = time.perf_counter()
-        analysis_times["EnKF-PO"].append(end_time - start_time)
-        results_rmse["EnKF-PO"].append(torch.sqrt(torch.mean((current_ensemble_enkf_po.mean(dim=0) - true_state_t)**2)).item())
+        # start_time = time.perf_counter()
+        # current_ensemble_enkf_po, _ = ensemble_kalman_filter_analysis(
+        #     forecast_inputs["EnKF-PO"], observation_y_t,
+        #     obs_op_l96_ensemble,
+        #     sigma_y_val,
+        #     method="EnKF-PertObs",
+        #     inflation_factor=inflation_val,
+        #     localization_matrix_Lxy=Lxy_l96,
+        #     localization_matrix_Lyy=Lyy_l96
+        # )
+        # end_time = time.perf_counter()
+        # analysis_times["EnKF-PO"].append(end_time - start_time)
+        # results_rmse["EnKF-PO"].append(torch.sqrt(torch.mean((current_ensemble_enkf_po.mean(dim=0) - true_state_t)**2)).item())
 
         # ERSF
-        start_time = time.perf_counter()
-        current_ensemble_ersf, _ = ensemble_kalman_filter_analysis(
-            forecast_inputs["ERSF"], observation_y_t,
-            obs_op_l96_ensemble,
-            sigma_y_val,
-            method="ERSF",
-            inflation_factor=inflation_val
-        )
-        end_time = time.perf_counter()
-        analysis_times["ERSF"].append(end_time - start_time)
-        results_rmse["ERSF"].append(torch.sqrt(torch.mean((current_ensemble_ersf.mean(dim=0) - true_state_t)**2)).item())
+        # start_time = time.perf_counter()
+        # current_ensemble_ersf, _ = ensemble_kalman_filter_analysis(
+        #     forecast_inputs["ERSF"], observation_y_t,
+        #     obs_op_l96_ensemble,
+        #     sigma_y_val,
+        #     method="ERSF",
+        #     inflation_factor=inflation_val
+        # )
+        # end_time = time.perf_counter()
+        # analysis_times["ERSF"].append(end_time - start_time)
+        # results_rmse["ERSF"].append(torch.sqrt(torch.mean((current_ensemble_ersf.mean(dim=0) - true_state_t)**2)).item())
 
         # LETKF
         start_time = time.perf_counter()
@@ -558,10 +559,11 @@ if __name__ == '__main__':
 
         if (cycle + 1) % 1 == 0 or cycle == num_analysis_cycles - 1:
             print(f"Cycle {cycle + 1:3d}: RMSEs -> "
-                  + f"BPF: {results_rmse['BPF'][-1]:.3f}; Time: {analysis_times['BPF'][-1]:.3f}, "
-                  + f"EnKF-PO: {results_rmse['EnKF-PO'][-1]:.3f}; Time: {analysis_times['EnKF-PO'][-1]:.3f}, "
-                  + f"ERSF: {results_rmse['ERSF'][-1]:.3f}; Time: {analysis_times['ERSF'][-1]:.3f}, "
-                  + f"LETKF: {results_rmse['LETKF'][-1]:.3f}; Time: {analysis_times['LETKF'][-1]:.3f}.")
+                  # + f"BPF: {results_rmse['BPF'][-1]:.3f}; Time: {analysis_times['BPF'][-1]:.3f}, "
+                  # + f"EnKF-PO: {results_rmse['EnKF-PO'][-1]:.3f}; Time: {analysis_times['EnKF-PO'][-1]:.3f}, "
+                  # + f"ERSF: {results_rmse['ERSF'][-1]:.3f}; Time: {analysis_times['ERSF'][-1]:.3f}, "
+                  + f"LETKF: {results_rmse['LETKF'][-1]:.3f}; Time: {analysis_times['LETKF'][-1]:.3f}."
+            )
 
     print("\nExample L96 DA run completed.")
 
