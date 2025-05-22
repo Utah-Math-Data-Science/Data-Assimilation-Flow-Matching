@@ -1,0 +1,7 @@
+defaults:
+  - _BootstrapParticleFilter
+  - override inflation_scale: ConstantScale
+  - _self_
+
+inflation_scale:
+  constant: 1.5

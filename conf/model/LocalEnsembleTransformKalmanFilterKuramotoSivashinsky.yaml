@@ -1,0 +1,8 @@
+defaults:
+  - _LocalEnsembleTransformKalmanFilter
+  - override inflation_scale: ConstantScale
+  - _self_
+
+inflation_scale:
+  constant: 1.
+loc_radius_gc: 8.
