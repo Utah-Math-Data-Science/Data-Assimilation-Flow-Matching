@@ -41,6 +41,8 @@ Supplementary Documentation
 Running the data assilimation algorithms
 ========================================
 
+Examples for the running the code are in the ``Examples`` subsection.
+
 Run the command
 
 .. code:: bash
@@ -75,9 +77,9 @@ where:
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``FlowMatchingMarginal*``: Our EnFF that approximates the flow matching vector field using a Monte Carlo approximation.
+   * ``FlowMatchingMarginal*``: Our EnFF methods that approximates the flow matching vector field using a Monte Carlo approximation.
 
-      * Variants available: ``FlowMatchingMarginalConditionalOptimalTransport``
+      * Variants available: ``FlowMatchingMarginalConditionalOptimalTransport`` for EnFF-OT and ``FlowMatchingMarginalPreviousPosteriorToPredictive`` for EnFF-F2P.
 
    * ``FlowMatchingGaussianTarget*``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
 
@@ -134,8 +136,20 @@ where:
 
          model/inflation_scale=ConstantScale model.inflation_scale.constant=1.01
 
-Running data ssimilation experiments with high-dimensional systems
-==================================================================
+Examples
+--------
+
+The following are example commands to show how to run the code.
+
+.. code:: bash
+
+   # Run EnFF-OT for Kuramoto-Sivashinsky with a grid of size 256
+   python src/dafm/main.py dataset=KuramotoSivashinsky dataset.state_dimension=256 model=FlowMatchingMarginalConditionalOptimalTransport model/guidance=LocalConstant model.guidance.schedule.constant=1 model.sampling_time_step_count=20
+   # Run EnFF-F2P for Navier-Stokes with a grid of size 64x64
+   python src/dafm/main.py rng_seed={rng_seed} dataset=NavierStokesDim64 model=FlowMatchingMarginalPreviousPosteriorToPredictive model/guidance=LocalConstant model.guidance.schedule.constant=.2 model.sampling_time_step_count=50
+
+Running data assimilation experiments with high-dimensional systems
+===================================================================
 
 By default, the true system state and observation trajectories are computed to the terminal time and stored on the specified device (see ``Conf.device`` in ``src/conf/conf.py``);
 however, for high-dimensional systems, this can require more RAM than is available when the ``Conf.device == 'cuda'``.
@@ -148,7 +162,7 @@ Use ``Dataset.save_only_mean_std`` to save the mean and standard deviation of th
 
 .. warning::
 
-   Due to a bug in ``hydra-orm``, the configuration settings mentiond here must be edited in their respective Python files.
+   Due to a bug in ``hydra-orm``, the configuration settings mentioned here must be edited in their respective Python files.
    Command line overrides for these settings will be ignored.
 
 Running data assimilation experiments in parallel
