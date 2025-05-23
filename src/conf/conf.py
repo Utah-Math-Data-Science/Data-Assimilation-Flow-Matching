@@ -25,7 +25,7 @@ class Conf(orm.Table):
     root_dir: str = field(default=str(utils.DIR_ROOT.resolve()))
     out_dir: str = field(default=str((utils.DIR_ROOT/'..'/'..'/'out'/'dafm').resolve()))
     run_subdir: str = field(default='runs')
-    prediction_filename: str = field(default='trajectories.parquet')
+    prediction_filename: str = field(default='trajectories')
     device: str = field(default='cuda')
 
     alt_id: str = orm.make_field(orm.ColumnRequired(sa.String(8), index=True, unique=True), init=False, omegaconf_ignore=True)
