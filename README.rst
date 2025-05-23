@@ -28,7 +28,7 @@ Installation
 
       pytest tests
 
-#. Edit the ``out_dir`` and ``runs_subdir`` fields of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the model training output to be saved.
+#. Edit the ``out_dir`` and ``run_subdir`` fields of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the model training output to be saved.
 
 Supplementary Documentation
 ===========================
