@@ -68,7 +68,7 @@ where:
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``ScoreMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``ScoreMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``ScoreMatchingMarginal*``: EnSF described in [Bao2024b]_.
+   * ``ScoreMatchingMarginal``: EnSF described in [Bao2024b]_.
 
       * Variants available: ``ScoreMatchingMarginalBao2024EnSF``
 
@@ -77,11 +77,11 @@ where:
       * The default parameters are for ``dataset=DoubleWell``.
         Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
 
-   * ``FlowMatchingMarginal*``: Our EnFF methods that approximates the flow matching vector field using a Monte Carlo approximation.
+   * ``FlowMatchingMarginal``: Our EnFF methods that approximates the flow matching vector field using a Monte Carlo approximation.
 
       * Variants available: ``FlowMatchingMarginalConditionalOptimalTransport`` for EnFF-OT and ``FlowMatchingMarginalPreviousPosteriorToPredictive`` for EnFF-F2P.
 
-   * ``FlowMatchingGaussianTarget*``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
+   * ``FlowMatchingGaussianTarget``: Our flow matching filter that assumes the prediction distribution (Bayesian prior) is Gaussian.
 
       * Variants available: ``FlowMatchingGaussianTargetConditionalOptimalTransport``
 
