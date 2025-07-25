@@ -1,7 +1,9 @@
 import copy
 
 
-def save_all_subfigures(plot, plot_name, format='pdf', renaming=None):
+def save_all_subfigures(plot, plot_name, format='pdf', renaming=None, metadata_dataframe=None):
+    if metadata_dataframe is not None:
+        metadata_dataframe.write_csv(f'{plot_name}.csv')
     renaming = renaming or {}
     p = copy.deepcopy(plot)
     p.figure.savefig(
