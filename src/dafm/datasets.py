@@ -426,6 +426,7 @@ class PredictedStatesAndObservation(IterableDataset):
             if self.logger is not None:
                 self.logger.log_metrics(dict(
                     time_s=log_time_step_time_end - log_time_step_time_start,
+                    crps=continuous_ranked_probability_score(sampled_state[None], self.dataset.true_state[[time_step + 1]]),
                 ), step=time_step + 1)
 
             is_last_time_step = time_step == self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first - 1
@@ -449,6 +450,29 @@ class PredictedStatesAndObservation(IterableDataset):
 
         if self.logger is not None:
             self.logger.save()
+
+
+def continuous_ranked_probability_score(predicted_state, true_state):
+    mean_r_from_true = reduce(
+        (predicted_state - true_state).square(),
+        't predicted_state_count dim -> t predicted_state_count 1',
+        'sum',
+    ).sqrt().mean(1, keepdim=True)
+
+    predicted_state_count = predicted_state.shape[1]
+    predicted_state_idx = torch.arange(predicted_state_count, dtype=torch.long, device=predicted_state.device)
+    predicted_state_a = predicted_state_idx.repeat_interleave(predicted_state_count)
+    predicted_state_b = predicted_state_idx.repeat(predicted_state_count)
+    self_loop_or_symmetric_edge = predicted_state_a >= predicted_state_b
+    predicted_state_a = predicted_state_a[~self_loop_or_symmetric_edge]
+    predicted_state_b = predicted_state_b[~self_loop_or_symmetric_edge]
+    half_mean_r_between_predicted_states = reduce(
+        (predicted_state[:, predicted_state_a] - predicted_state[:, predicted_state_b]).square(),
+        't predicted_state_count dim -> t predicted_state_count 1',
+        'sum',
+    ).sqrt().sum(1, keepdim=True) / predicted_state_count**2
+
+    return mean_r_from_true  - half_mean_r_between_predicted_states
 
 
 def save_trajectories(cfg, data, save_dir):
