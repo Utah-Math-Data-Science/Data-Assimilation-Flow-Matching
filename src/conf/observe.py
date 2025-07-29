@@ -21,3 +21,8 @@ class Exponentiate(Observe):
 
 class ATan(Observe):
     pass
+
+
+class ATanEveryNthDimension(Observe):
+    start_at_zero: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=True)
+    n: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1)

@@ -44,6 +44,11 @@ class ATan(Observe):
         return state.atan()
 
 
+class ATanEveryNthDimension(EveryNthDimension):
+    def forward(self, state):
+        return super().forward(state).atan()
+
+
 def get_observe(cfg):
     if isinstance(cfg.observe, conf.observe.Full):
         return Full(cfg.observe, cfg)
@@ -53,5 +58,7 @@ def get_observe(cfg):
         return Exponentiate(cfg.observe, cfg)
     elif isinstance(cfg.observe, conf.observe.ATan):
         return ATan(cfg.observe, cfg)
+    elif isinstance(cfg.observe, conf.observe.ATanEveryNthDimension):
+        return ATanEveryNthDimension(cfg.observe, cfg)
     else:
         raise ValueError(f'Unknown observe: {cfg.observe}')
