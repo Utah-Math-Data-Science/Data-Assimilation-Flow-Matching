@@ -400,6 +400,8 @@ class PredictedStatesAndObservation(IterableDataset):
             if self.model.cfg.epoch_count > 0 and (not ignore_observation or self.model.cfg.train_when_ignoring_observation):
                 yield self.model.cfg.epoch_count, time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
             if not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation:
+                if self.dataset.cfg.use_predicted_state_perturbation:
+                    next_predicted_state = next_predicted_state + torch.randn_like(next_predicted_state) * self.dataset.cfg.predicted_state_perturbation_std
                 for done, sample_time_step, sample_time, sampled_state in self.model.sampling_steps(next_predicted_state, next_observation, self.dataset.observe):
                     if self.model.cfg.epoch_count_sampling > 0 and not done:
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_time, sampled_state, next_observation, ignore_observation

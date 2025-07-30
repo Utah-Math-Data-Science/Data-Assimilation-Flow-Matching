@@ -52,9 +52,13 @@ class Dataset(orm.InheritableTable):
 
     state_perturbation: StatePerturbation = orm.make_field(orm.ColumnRequired(sa.Enum(StatePerturbation)), default=StatePerturbation.IDENTITY)
 
+    use_predicted_state_perturbation: bool = orm.make_field(orm.ColumnRequired(sa.Boolean), default=False)
+    predicted_state_perturbation_std: float = orm.make_field(orm.ColumnRequired(sa.Double), default=0.)
+
     @property
     def save_only_mean_std(self):
-        return self.state_dimension >= 100 and self.predicted_state_count > 1
+        return self.state_dimension >= 100#and self.predicted_state_count > 1
+
 
 class Simple(Dataset):
     pass
