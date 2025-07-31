@@ -219,6 +219,13 @@ class EnsembleKalmanFilterPerturbedObservations(Model):
     loc_radius_gc: float = orm.make_field(orm.ColumnRequired(sa.Double), default=5.)  # Effective radius for Gaspari-Cohn like localization
 
 
+class EnsembleKalmanFilterPerturbedObservationsIterative(Model):
+    defaults: List[Any] = hydra_orm.utils.make_defaults_list([
+        dict(inflation_scale=omegaconf.MISSING),
+        '_self_',
+    ])
+
+
 class EnsembleRandomizedSquareRootFilter(Model):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
         dict(inflation_scale=omegaconf.MISSING),

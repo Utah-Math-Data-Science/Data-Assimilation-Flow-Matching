@@ -11,7 +11,7 @@ import conf.diffusion_path
 import conf.inflation_scale
 import dafm.diffusion_path
 import dafm.inflation_scale
-from dafm import flow_matching_guidance, models_classical, utils
+from dafm import flow_matching_guidance, models_classical, models_classical_iterative, utils
 
 
 log = logging.getLogger(__file__)
@@ -664,9 +664,10 @@ class FlowMatchingGaussianTarget(nn.Module):
 
 
 class Classical(nn.Module):
-    def __init__(self, cfg, observation_noise_std, inflation_scale):
+    def __init__(self, cfg, observation_noise_std, inflation_scale, dynamics):
         super().__init__()
         self.cfg = cfg
+        self.dynamics = dynamics
         self.observation_noise_std = observation_noise_std
         self.inflation_scale = inflation_scale
 
@@ -722,9 +723,34 @@ class EnsembleKalmanFilterPerturbedObservations(Classical):
                 coords_observation, coords_observation, self.cfg.loc_radius_gc,
                 domain_lengths=domain_lengths,
             ),
-            do_inflation=False,  # inflation is done in src/datasets.py
+            do_inflation=False,  # inflation is done in src/dafm/datasets.py
         )[0]
         yield True, 0, None, sampled_state
+
+
+class EnsembleKalmanFilterPerturbedObservationsIterative(Classical):
+    @torch.no_grad
+    def sampling_steps(self, data, observation, observe, time_step_count=None):
+        sampled_state = models_classical_iterative.ensemble_kalman_filter_analysis(
+            ensemble_f=data[None],
+            observation_y=rearrange(observation, '1 dim -> dim'),
+            observation_operator_ens=observe,
+            sigma_y=self.observation_noise_std,
+            method='iEnKS-PertObs',
+            inflation_factor=1.,  # inflation is done in src/dafm/datasets.py
+            ienks_lag=1,
+            ienks_niter=10,
+            ienks_wtol=1e-5,
+            model_args=dict(
+                # passing None to the propagator because the experiments being run
+                # happen to not need these arguments
+                propagator=lambda rhs_func, state, dt: self.dynamics._step_state(None, None, state, None),
+                rhs=None,
+                dt=self.dynamics.cfg.time_step_size,
+                steps_between_analyses=self.dynamics.cfg.observe_every_n_time_steps,
+            ),
+        )[0]
+        yield True, 0, None, sampled_state.squeeze(0)
 
 
 class EnsembleRandomizedSquareRootFilter(Classical):
@@ -763,7 +789,7 @@ class LocalEnsembleTransformKalmanFilter(Classical):
         yield True, 0, None, sampled_state
 
 
-def get_model(cfg, state_dimension, observation_noise_std):
+def get_model(cfg, state_dimension, observation_noise_std, dynamics):
     inflation_scale = dafm.inflation_scale.get_inflation_scale(cfg.inflation_scale)
     if isinstance(cfg, conf.models.ScoreMatching):
         diffusion_path = dafm.diffusion_path.get_diffusion_path(cfg.diffusion_path, target_distribution_at_time_1=False)
@@ -784,12 +810,14 @@ def get_model(cfg, state_dimension, observation_noise_std):
         guidance = flow_matching_guidance.get_guidance(cfg.guidance)
         return FlowMatchingGaussianTarget(cfg, observation_noise_std, diffusion_path, inflation_scale, guidance)
     elif isinstance(cfg, conf.models.BootstrapParticleFilter):
-        return BootstrapParticleFilter(cfg, observation_noise_std, inflation_scale)
+        return BootstrapParticleFilter(cfg, observation_noise_std, inflation_scale, dynamics)
     elif isinstance(cfg, conf.models.EnsembleKalmanFilterPerturbedObservations):
-        return EnsembleKalmanFilterPerturbedObservations(cfg, observation_noise_std, inflation_scale)
+        return EnsembleKalmanFilterPerturbedObservations(cfg, observation_noise_std, inflation_scale, dynamics)
     elif isinstance(cfg, conf.models.EnsembleRandomizedSquareRootFilter):
-        return EnsembleRandomizedSquareRootFilter(cfg, observation_noise_std, inflation_scale)
+        return EnsembleRandomizedSquareRootFilter(cfg, observation_noise_std, inflation_scale, dynamics)
     elif isinstance(cfg, conf.models.LocalEnsembleTransformKalmanFilter):
-        return LocalEnsembleTransformKalmanFilter(cfg, observation_noise_std, inflation_scale)
+        return LocalEnsembleTransformKalmanFilter(cfg, observation_noise_std, inflation_scale, dynamics)
+    elif isinstance(cfg, conf.models.EnsembleKalmanFilterPerturbedObservationsIterative):
+        return EnsembleKalmanFilterPerturbedObservationsIterative(cfg, observation_noise_std, inflation_scale, dynamics)
     else:
         raise ValueError(f'Unknown model: {cfg}')

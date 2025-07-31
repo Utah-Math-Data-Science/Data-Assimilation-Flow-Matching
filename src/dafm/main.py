@@ -75,7 +75,7 @@ def main(cfg):
     with pl.utilities.seed.isolate_rng():
         dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device, delete_true_state=True)
     with pl.utilities.seed.isolate_rng():
-        model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_noise_std)
+        model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_noise_std, dynamics)
 
     time_step_time_logger = loggers.CSVLogger(cfg.run_dir, name=None, name_metrics_file='time_step_times.csv')
 

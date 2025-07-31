@@ -73,6 +73,7 @@ orm.store_config(models.FlowMatchingMarginal, group=Conf.model.key, name=f'_{mod
 orm.store_config(models.FlowMatchingGaussianTarget, group=Conf.model.key, name=f'_{models.FlowMatchingGaussianTarget.__name__}')
 orm.store_config(models.BootstrapParticleFilter, group=Conf.model.key, name=f'_{models.BootstrapParticleFilter.__name__}')
 orm.store_config(models.EnsembleKalmanFilterPerturbedObservations, group=Conf.model.key, name=f'_{models.EnsembleKalmanFilterPerturbedObservations.__name__}')
+orm.store_config(models.EnsembleKalmanFilterPerturbedObservationsIterative, group=Conf.model.key, name=f'_{models.EnsembleKalmanFilterPerturbedObservationsIterative.__name__}')
 orm.store_config(models.EnsembleRandomizedSquareRootFilter, group=Conf.model.key, name=f'_{models.EnsembleRandomizedSquareRootFilter.__name__}')
 orm.store_config(models.LocalEnsembleTransformKalmanFilter, group=Conf.model.key, name=f'_{models.LocalEnsembleTransformKalmanFilter.__name__}')
 orm.store_config(diffusion_path.ConditionalOptimalTransport, group=f'{Conf.model.key}/{models.FlowMatching.diffusion_path.key}')
