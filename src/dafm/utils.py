@@ -1,11 +1,60 @@
+import sys
 from pathlib import Path
 
+import hydra
+from omegaconf import OmegaConf
 import torch.distributions
 from torch.distributions.utils import _sum_rightmost
+
+from conf import conf
 
 
 DIR_ROOT = (Path(__file__).parent/'..'/'..').resolve()
 HYDRA_INIT = dict(version_base=None, config_path='../../conf', config_name='conf')
+
+# generated using f'0x{secrets.randbits(128):x}'
+RNG_RANDBITS = {
+    2376999025: 0x43e2a09d8b8e89c269435eb906c9890f,
+    # 0x9ce12aa97c67b0e330eba6143aeb4c01,
+    # 0xd1af79b87b0b0c062cc49d79f053f541,
+    # 0xabba188e774c6f1a69bff838fc031252,
+    # 0x704e81235a98055f9902925f54f4f3cf,
+    # 0xf117601173413e80e52730bbc35a9a30,
+    # 0xba34cac1947618b4675e025b80354c5f,
+    # 0x2b2248d12b11c21f710a810301ac0c84,
+    # 0x4ea71aa1596d37538cfeaa834c92902d,
+    # 0x6f662da8e82fc058306bb92da6c43f23,
+}
+
+
+def get_run_dir(hydra_init=HYDRA_INIT, commit=True, engine_name='runs'):
+    if '-m' in sys.argv or '--multirun' in sys.argv:
+        raise ValueError("The flags '-m' and '--multirun' are not supported. Use GNU parallel instead.")
+    with hydra.initialize(version_base=hydra_init['version_base'], config_path=hydra_init['config_path']):
+        last_override = None
+        overrides = []
+        for i, a in enumerate(sys.argv):
+            if '=' in a:
+                overrides.append(a)
+                last_override = i
+        cfg = hydra.compose(hydra_init['config_name'], overrides=overrides)
+        engine = conf.get_engine(name=engine_name)
+        conf.orm.create_all(engine)
+        with conf.sa.orm.Session(engine, expire_on_commit=False) as db:
+            cfg = conf.orm.instantiate_and_insert_config(db, OmegaConf.to_container(cfg, resolve=True))
+            # if commit and '-c' not in sys.argv:
+            if commit:
+                db.commit()
+                cfg.run_dir.mkdir(exist_ok=True)
+            return last_override, str(cfg.run_dir)
+
+
+def set_run_dir(last_override, run_dir):
+    run_dir_override = f'hydra.run.dir={run_dir}'
+    if last_override is None:
+        sys.argv.append(run_dir_override)
+    else:
+        sys.argv.insert(last_override + 1, run_dir_override)
 
 
 def unpack_batch(batch):

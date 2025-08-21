@@ -25,53 +25,45 @@ def euler_maruyama(dt, t, x, f, noise):
 
 
 class Dataset:
-    def __init__(self, cfg, observe, state_perturbation, device, delete_true_state=False):
+    def __init__(self, cfg, rng, observe, state_perturbation, device, delete_true_state=False):
         self.cfg = cfg
         self.observe = observe
         self.device = device
-        self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
-        if self.store_trajectory_on_cpu:
-            device = 'cpu'
+        self.state_perturbation = state_perturbation
 
-        time_step_indices, times_from_zero = self.time_steps_and_times(cfg, device)
-        times_to_keep = time_step_indices >= self.cfg.time_step_count_drop_first
-        self.times = times_from_zero[times_to_keep]
-        self.true_state = []
-        self.true_state.append(self.initialize_true_state(cfg, device))
+        (
+            self.rng_initial_state,
+            self.rng_model_noise,
+            self.rng_predicted_state_model_noise,
+            self.rng_observation_noise,
+        ) = rng.spawn(4)
 
-        predicted_state_initial_condition_noise = torch.randn((cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_initial_condition_std
-        true_state_noise = torch.randn((times_from_zero.shape[0] - 1, *self.true_state[0].shape), device=device) * cfg.model_noise_std
-        observation_noise = torch.randn((self.times.shape[0], *self.observe(self.true_state[0]).shape), device=device) * cfg.observation_noise_std
-        self.predicted_state_noise = torch.randn((self.times[:-1].shape[0], cfg.predicted_state_count, cfg.state_dimension), device=device) * cfg.predicted_state_model_noise_std
+        true_state = self.initialize_true_state(cfg, device)
+        for time_steps in zip(range(cfg.time_step_count_drop_first), range(1, cfg.time_step_count_drop_first + 1)):
+            times = [ts * cfg.time_step_size for ts in time_steps]
+            true_state = state_perturbation(time_steps[0], true_state)
+            noise = self.get_noise(true_state.shape, self.rng_model_noise, cfg.model_noise_std, device=device)
+            true_state = self._step_state(time_steps[0], times, true_state, noise)
+        self.true_state = true_state
 
-        for time_step, t_now_and_next in enumerate(times_from_zero.unfold(0, 2, 1)):
-            true_state = self.true_state[-1]
-            true_state = state_perturbation(time_step, true_state)
-            self.true_state.append(
-                self._step_state(time_step, t_now_and_next, true_state, true_state_noise[time_step])
-            )
-
-        self.true_state = rearrange(
-            self.true_state,
-            't 1 dim -> t 1 dim'
+        predicted_state_initial_condition = self.get_noise(
+            (cfg.predicted_state_count, *true_state.shape[1:]),
+            self.rng_predicted_state_model_noise,
+            cfg.predicted_state_initial_condition_std,
+            device=true_state.device
         )
-
-        self.true_state = self.true_state[times_to_keep]
-
-        predicted_state_initial_condition = predicted_state_initial_condition_noise
         if cfg.predicted_state_initial_condition_add_true_state:
-            predicted_state_initial_condition += self.true_state[0]
+            predicted_state_initial_condition += true_state
         self.current_predicted_state = predicted_state_initial_condition
 
-        self.observation = self.observe(self.true_state) + observation_noise
-
-        if delete_true_state:
-            self.true_state = None
-
-    @staticmethod
-    def time_steps_and_times(cfg, device):
-        time_step_indices = torch.arange(cfg.time_step_count + 1, device=device)
-        return time_step_indices, cfg.time_step_size * time_step_indices[:, None]
+    def get_noise(self, shape, rng, std, **kwargs):
+        if 'dtype' not in kwargs:
+            kwargs['dtype'] = torch.float32
+        if std > 0:
+            noise = torch.tensor(rng.normal(scale=std, size=shape), **kwargs)
+        else:
+            noise = 0.
+        return noise
 
     def initialize_true_state(self, cfg, device):
         raise NotImplementedError()
@@ -87,29 +79,38 @@ class Dataset:
                     'Please choose a different integrator (e.g., set dataset.integrator=EULER_MARUYAMA) or set dataset.model_noise_std=0 and dataset.predicted_state_model_noise_std=0.'
                 )
             next_state = odeint(
-                self.dynamics, state, rearrange(t_now_and_next, '1 times -> times'),
+                self.dynamics, state, torch.tensor(t_now_and_next, device=state.device),
                 method='rk4', options=dict(step_size=self.cfg.time_step_size),
             )[1]
         elif self.cfg.integrator is conf.datasets.Integrator.EULER_MARUYAMA:
             next_state = euler_maruyama(
-            self.cfg.time_step_size, t_now_and_next[:, :1], state, self.dynamics, model_noise
+            self.cfg.time_step_size, t_now_and_next[0], state, self.dynamics, model_noise
             )
         else:
             raise ValueError(f'Unknown integrator: {self.cfg.integrator}')
         return next_state
 
-    def predict(self, time_step, t_now_and_next, sampled_state):
-        return self._step_state(time_step, t_now_and_next, sampled_state, self.predicted_state_noise[time_step])
+    def predict(self, time_step, t_now_and_next, sampled_state, noise):
+        return self._step_state(time_step, t_now_and_next, sampled_state, noise)
 
     def __iter__(self):
-        for time_step, t_now_and_next in enumerate(self.times.unfold(0, 2, 1)):
-            ignore_observation = time_step % self.cfg.observe_every_n_time_steps != 0
-            yield time_step, t_now_and_next, self.current_predicted_state, self.observation[time_step + 1], ignore_observation
+        for time_steps in zip(
+            range(self.cfg.time_step_count_drop_first, self.cfg.time_step_count),
+            range(self.cfg.time_step_count_drop_first + 1, self.cfg.time_step_count + 1),
+        ):
+            times = [ts * self.cfg.time_step_size for ts in time_steps]
+            self.true_state = self.state_perturbation(time_steps[0], self.true_state)
+            model_noise = self.get_noise(self.true_state.shape, self.rng_model_noise, self.cfg.model_noise_std, device=self.device)
+            self.true_state = self._step_state(time_steps[0], times, self.true_state, model_noise)
+            ignore_observation = (time_steps[0] - self.cfg.time_step_count_drop_first) % self.cfg.observe_every_n_time_steps != 0
+            observation = self.observe(self.true_state)
+            observation_noise = self.get_noise(observation.shape, self.rng_observation_noise, self.cfg.observation_noise_std, device=self.true_state.device)
+            yield time_steps[0], times, self.current_predicted_state, observation + observation_noise, ignore_observation
 
 
 class DoubleWell(Dataset):
     def initialize_true_state(self, cfg, device):
-        true_state = -1 + torch.randn((1, self.cfg.state_dimension), device=device) * cfg.true_state_initial_condition_std
+        true_state = -1 + self.get_noise((1, self.cfg.state_dimension), self.rng_initial_state, cfg.true_state_initial_condition_std, device=device)
         return true_state
 
     def dynamics(self, t, x):
@@ -118,7 +119,7 @@ class DoubleWell(Dataset):
 
 class Lorenz63(Dataset):
     def initialize_true_state(self, cfg, device):
-        true_state = torch.randn((1, self.cfg.state_dimension), device=device)
+        true_state = self.get_noise((1, self.cfg.state_dimension), self.rng_initial_state, 1., device=device)
         return true_state
 
     def dynamics(self, t, x):
@@ -134,7 +135,7 @@ class Lorenz63(Dataset):
 
 class Lorenz96(Dataset):
     def initialize_true_state(self, cfg, device):
-        true_state = cfg.true_state_initial_condition_mean + torch.randn((1, self.cfg.state_dimension), device=device) * cfg.true_state_initial_condition_std
+        true_state = cfg.true_state_initial_condition_mean + self.get_noise((1, self.cfg.state_dimension), self.rng_initial_state, cfg.true_state_initial_condition_std, device=device)
         # true_state = torch.ones((1, self.cfg.state_dimension), device=device) * self.cfg.forcing
         return true_state
 
@@ -175,7 +176,7 @@ class NavierStokes(Dataset):
         return x
 
     def sample_squared_exponential_gaussian_process(self, cfg, device, dtype):
-        w = np.random.randn(cfg.grid_horizontal_count, cfg.grid_vertical_count)
+        w = self.rng_initial_state.normal(size=(cfg.grid_horizontal_count, cfg.grid_vertical_count))
         w_hat = np.fft.fft2(w)
         kx = np.fft.fftfreq(cfg.grid_horizontal_count, d=self.grid_horizontal_spacing)
         ky = np.fft.fftfreq(cfg.grid_vertical_count, d=self.grid_vertical_spacing)
@@ -260,18 +261,15 @@ class NavierStokes(Dataset):
 
 
 class KuramotoSivashinsky(Dataset):
-    def __init__(self, cfg, observe, state_perturbation, device, delete_true_state=False):
+    def __init__(self, cfg, rng, observe, state_perturbation, device, delete_true_state=False):
         if cfg.floating_point_precision == 64:
             self.dtype = torch.float64
         elif cfg.floating_point_precision == 32:
             self.dtype = torch.float32
         else:
             raise ValueError(f'Unknown floating point precision (should be 32 or 64): {self.cfg.floating_point_precision}')
-        self.store_trajectory_on_cpu = cfg.state_dimension > cfg.trajectory_stored_on_gpu_max_state_dimension
-        if self.store_trajectory_on_cpu:
-            device = 'cpu'
         self.solve = self.etd_rk4_wrapper(cfg, device)
-        super().__init__(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        super().__init__(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
 
     def initialize_true_state(self, cfg, device):
         x0 = torch.tensor(dapper.mods.KS.Model(
@@ -280,7 +278,7 @@ class KuramotoSivashinsky(Dataset):
             Nx=cfg.state_dimension,
         ).x0, device=device, dtype=self.dtype)
         x0 = rearrange(x0, 'state_dimension -> 1 state_dimension')
-        return x0 + torch.randn_like(x0)
+        return x0 + self.get_noise(x0.shape, self.rng_initial_state, 1., device=device)
 
     def _step_state(self, time_step, t_now_and_next, state, model_noise):
         return self.solve(None, state)
@@ -361,17 +359,11 @@ class PredictedStatesAndObservation(IterableDataset):
             self.time_step = time_step
             if isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
                 self.model.diffusion_path.set_previous_posterior(predicted_state)
-            t_now_and_next, predicted_state, next_observation = map(
-                lambda x: x.to(self.dataset.device),
-                (t_now_and_next, predicted_state, next_observation)
-            )
             yield self.model.cfg.epoch_count, time_step, t_now_and_next, predicted_state, next_observation, True
             if self.model.cfg.resample_initial_predicted_state:
                 for done, sample_time_step, sample_time, sampled_state in self.model.sampling_steps(predicted_state, next_observation, self.dataset.observe):
                     if self.model.cfg.epoch_count_sampling > 0 and not done:
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_time, sampled_state, next_observation, True
-                if self.dataset.store_trajectory_on_cpu:
-                    sampled_state = sampled_state.to('cpu')
                 self.dataset.current_predicted_state= sampled_state
         data_to_save = dict(
             time_step=[],
@@ -384,32 +376,40 @@ class PredictedStatesAndObservation(IterableDataset):
            desc='Estimating state at time step',
         ):
             data_to_save['time_step'].append(time_step)
-            data_to_save['times'].append(t_now_and_next[:, 0].cpu())
+            data_to_save['times'].append(torch.tensor([t_now_and_next[0]]))
             data_to_save['predicted_state'].append(predicted_state.cpu())
-
-            log_time_step_time_start = time.process_time()
 
             self.time_step = time_step
             if hasattr(self.model.cfg, 'diffusion_path') and isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
                 self.model.diffusion_path.set_previous_posterior(predicted_state.to(self.dataset.device))
-            next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state)
-            t_now_and_next, next_predicted_state, next_observation = map(
-                lambda x: x.to(self.dataset.device),
-                (t_now_and_next, next_predicted_state, next_observation)
-            )
+
+            # tensors that may need to be moved to a device
+            # keep these out of the timing
+            predicted_state_model_noise = self.dataset.get_noise(predicted_state.shape, self.dataset.rng_predicted_state_model_noise, self.dataset.cfg.predicted_state_model_noise_std, device=self.dataset.device)
+            if (not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation) and self.dataset.cfg.use_predicted_state_perturbation:
+                predicted_state_perturbation_before_sampling = self.dataset.get_noise(predicted_state.shape, self.dataset.rng_predicted_state_model_noise, self.dataset.cfg.predicted_state_perturbation_std, device=predicted_state.device)
+            if not ignore_observation and self.model.cfg.use_state_perturbation:
+                predicted_state_perturbation_after_sampling = self.dataset.get_noise(predicted_state.shape, self.dataset.rng_predicted_state_model_noise, self.model.cfg.state_perturbation_std, device=predicted_state.device)
+
+            log_time_step_time_start = time.process_time()
+
+            next_predicted_state = self.dataset.predict(time_step, t_now_and_next, predicted_state, predicted_state_model_noise)
+
             if self.model.cfg.epoch_count > 0 and (not ignore_observation or self.model.cfg.train_when_ignoring_observation):
                 yield self.model.cfg.epoch_count, time_step, t_now_and_next, next_predicted_state, next_observation, ignore_observation
+
             if not ignore_observation or self.model.cfg.resample_predicted_state_when_ignoring_observation:
                 if self.dataset.cfg.use_predicted_state_perturbation:
-                    next_predicted_state = next_predicted_state + torch.randn_like(next_predicted_state) * self.dataset.cfg.predicted_state_perturbation_std
+                    next_predicted_state = next_predicted_state + predicted_state_perturbation_before_sampling
                 for done, sample_time_step, sample_time, sampled_state in self.model.sampling_steps(next_predicted_state, next_observation, self.dataset.observe):
                     if self.model.cfg.epoch_count_sampling > 0 and not done:
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_time, sampled_state, next_observation, ignore_observation
             else:
                 sampled_state = next_predicted_state
+
             if not ignore_observation:
                 if self.model.cfg.use_state_perturbation:
-                    sampled_state = sampled_state + torch.randn_like(sampled_state) * self.model.cfg.state_perturbation_std
+                    sampled_state = sampled_state + predicted_state_perturbation_after_sampling
                 if not isinstance(self.model.cfg.inflation_scale, conf.inflation_scale.NoScaling):
                     sampled_state_mean = reduce(
                         sampled_state,
@@ -420,18 +420,18 @@ class PredictedStatesAndObservation(IterableDataset):
                     sampled_state = (
                         sampled_state_mean + self.model.inflation_scale(sampled_state_centered) * sampled_state_centered
                     )
-            if self.dataset.store_trajectory_on_cpu:
-                sampled_state = sampled_state.to('cpu')
             self.dataset.current_predicted_state = sampled_state
 
             log_time_step_time_end = time.process_time()
+
             if self.logger is not None:
                 self.logger.log_metrics(dict(
                     time_s=log_time_step_time_end - log_time_step_time_start,
-                    crps=continuous_ranked_probability_score(sampled_state[None], self.dataset.true_state[[time_step + 1]]),
+                    rmse=reduce((sampled_state.mean(0, keepdims=True) - self.dataset.true_state).square(), '1 dim ->', 'mean').sqrt(),
+                    crps=continuous_ranked_probability_score(sampled_state, self.dataset.true_state),
                 ), step=time_step + 1)
 
-            is_last_time_step = time_step == self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first - 1
+            is_last_time_step = time_step == self.dataset.cfg.time_step_count - 1
             if (
                 self.dataset.cfg.save_data_every_n_time_steps is not None and time_step > 0 and time_step % self.dataset.cfg.save_data_every_n_time_steps == 0
                 or
@@ -439,7 +439,7 @@ class PredictedStatesAndObservation(IterableDataset):
             ):
                 if is_last_time_step:
                     data_to_save['time_step'].append(time_step + 1)
-                    data_to_save['times'].append(t_now_and_next[:, 1].cpu())
+                    data_to_save['times'].append(torch.tensor([t_now_and_next[1]]))
                     data_to_save['predicted_state'].append(sampled_state.cpu())
                     self.data_to_save_callback(time_step + 1, data_to_save)
                 else:
@@ -457,11 +457,11 @@ class PredictedStatesAndObservation(IterableDataset):
 def continuous_ranked_probability_score(predicted_state, true_state):
     mean_r_from_true = reduce(
         (predicted_state - true_state).square(),
-        't predicted_state_count dim -> t predicted_state_count 1',
+        'predicted_state_count dim -> predicted_state_count',
         'sum',
-    ).sqrt().mean(1, keepdim=True)
+    ).sqrt().mean(0)
 
-    predicted_state_count = predicted_state.shape[1]
+    predicted_state_count = predicted_state.shape[0]
     predicted_state_idx = torch.arange(predicted_state_count, dtype=torch.long, device=predicted_state.device)
     predicted_state_a = predicted_state_idx.repeat_interleave(predicted_state_count)
     predicted_state_b = predicted_state_idx.repeat(predicted_state_count)
@@ -469,10 +469,10 @@ def continuous_ranked_probability_score(predicted_state, true_state):
     predicted_state_a = predicted_state_a[~self_loop_or_symmetric_edge]
     predicted_state_b = predicted_state_b[~self_loop_or_symmetric_edge]
     half_mean_r_between_predicted_states = reduce(
-        (predicted_state[:, predicted_state_a] - predicted_state[:, predicted_state_b]).square(),
-        't predicted_state_count dim -> t predicted_state_count 1',
+        (predicted_state[predicted_state_a] - predicted_state[predicted_state_b]).square(),
+        'predicted_state_count dim -> predicted_state_count',
         'sum',
-    ).sqrt().sum(1, keepdim=True) / predicted_state_count**2
+    ).sqrt().sum(0) / predicted_state_count**2
 
     return mean_r_from_true  - half_mean_r_between_predicted_states
 
@@ -566,20 +566,20 @@ def get_state_perturbation(state_perturbation):
         raise ValueError(f'Unknown state perturbation: {state_perturbation}')
 
 
-def get_dynamics_dataset(cfg, device, delete_true_state=False):
+def get_dynamics_dataset(cfg, rng, device, delete_true_state=False):
     observe = dafm.observe.get_observe(cfg)
     state_perturbation = get_state_perturbation(cfg.state_perturbation)
     if isinstance(cfg, conf.datasets.DoubleWell):
-        return DoubleWell(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        return DoubleWell(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.Lorenz63):
-        return Lorenz63(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        return Lorenz63(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.Lorenz96):
-        return Lorenz96(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        return Lorenz96(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.NavierStokes):
-        return NavierStokes(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        return NavierStokes(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.KuramotoSivashinsky):
-        return KuramotoSivashinsky(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        return KuramotoSivashinsky(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
     elif isinstance(cfg, conf.datasets.Simple):
-        return Simple(cfg, observe, state_perturbation, device, delete_true_state=delete_true_state)
+        return Simple(cfg, rng, observe, state_perturbation, device, delete_true_state=delete_true_state)
     else:
         raise ValueError(f'Unknown dynamics dataset: {cfg}')

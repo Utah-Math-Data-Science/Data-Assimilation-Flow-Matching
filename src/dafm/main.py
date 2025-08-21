@@ -6,6 +6,7 @@ import sys
 from einops import reduce
 import hydra
 from omegaconf import OmegaConf
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data.dataloader import DataLoader
@@ -71,17 +72,17 @@ def main(cfg):
         log.info(pprint.pformat(cfg))
         log.info('Output directory: %s', cfg.run_dir)
 
+    rng = np.random.default_rng(utils.RNG_RANDBITS[cfg.rng_seed])
+    dynamics = datasets.get_dynamics_dataset(cfg.dataset, rng, cfg.device, delete_true_state=True)
     pl.seed_everything(cfg.rng_seed)
-    with pl.utilities.seed.isolate_rng():
-        dynamics = datasets.get_dynamics_dataset(cfg.dataset, cfg.device, delete_true_state=True)
     with pl.utilities.seed.isolate_rng():
         model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_noise_std, dynamics)
 
-    time_step_time_logger = loggers.CSVLogger(cfg.run_dir, name=None, name_metrics_file='time_step_times.csv')
+    dataset_logger = loggers.CSVLogger(cfg.run_dir, name=None, name_metrics_file='dataset_metrics.csv')
 
     dataset = datasets.PredictedStatesAndObservation(
         dynamics, model,
-        logger=time_step_time_logger,
+        logger=dataset_logger,
         data_to_save_callback=lambda time_step, data_to_save: datasets.save_trajectories(
             cfg.dataset, data_to_save,
             cfg.run_dir/(f'{cfg.prediction_filename}.{time_step}.parquet' if cfg.dataset.save_data_every_n_time_steps is not None else f'{cfg.prediction_filename}.parquet')
@@ -121,33 +122,7 @@ def main(cfg):
             raise e
 
 
-def get_run_dir(hydra_init=utils.HYDRA_INIT, commit=True):
-    if '-m' in sys.argv:
-        raise ValueError("The flag '-m' is not supported. Use GNU parallel instead.")
-    with hydra.initialize(version_base=hydra_init['version_base'], config_path=hydra_init['config_path']):
-        last_override = None
-        overrides = []
-        for i, a in enumerate(sys.argv):
-            if '=' in a:
-                overrides.append(a)
-                last_override = i
-        cfg = hydra.compose(hydra_init['config_name'], overrides=overrides)
-        engine = conf.get_engine()
-        conf.orm.create_all(engine)
-        with conf.sa.orm.Session(engine, expire_on_commit=False) as db:
-            cfg = conf.orm.instantiate_and_insert_config(db, OmegaConf.to_container(cfg, resolve=True))
-            if commit:
-            # if commit and '-c' not in sys.argv:
-                db.commit()
-                cfg.run_dir.mkdir(exist_ok=True)
-            return last_override, str(cfg.run_dir)
-
-
 if __name__ == '__main__':
-    last_override, run_dir = get_run_dir()
-    run_dir_override = f'hydra.run.dir={run_dir}'
-    if last_override is None:
-        sys.argv.append(run_dir_override)
-    else:
-        sys.argv.insert(last_override + 1, run_dir_override)
+    last_override, run_dir = utils.get_run_dir()
+    utils.set_run_dir(last_override, run_dir)
     main()
