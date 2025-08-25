@@ -346,11 +346,12 @@ class Simple(Dataset):
 
 
 class PredictedStatesAndObservation(IterableDataset):
-    def __init__(self, dataset, model, logger=None, data_to_save_callback=lambda *_: None):
+    def __init__(self, dataset, model, logger=None, save_data=True, data_to_save_callback=lambda *_: None):
         self.dataset = dataset
         self.model = model
         self.logger = logger
         self.time_step = None  # set in iter
+        self.save_data = save_data
         self.data_to_save_callback = data_to_save_callback
 
     def __iter__(self):
@@ -364,24 +365,25 @@ class PredictedStatesAndObservation(IterableDataset):
                 for done, sample_time_step, sample_time, sampled_state in self.model.sampling_steps(predicted_state, next_observation, self.dataset.observe):
                     if self.model.cfg.epoch_count_sampling > 0 and not done:
                         yield self.model.cfg.epoch_count_sampling, sample_time_step, sample_time, sampled_state, next_observation, True
-                self.dataset.current_predicted_state= sampled_state
+                self.dataset.current_predicted_state = sampled_state
         data_to_save = dict(
             time_step=[],
             times=[], predicted_state=[],
         )
+        if hasattr(self.model.cfg, 'diffusion_path') and isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
+            self.model.diffusion_path.set_previous_posterior(self.dataset.current_predicted_state)
         for time_step, t_now_and_next, predicted_state, next_observation, ignore_observation in tqdm(
            self.dataset,
            total=self.dataset.cfg.time_step_count - self.dataset.cfg.time_step_count_drop_first,
            initial=1,
            desc='Estimating state at time step',
         ):
-            data_to_save['time_step'].append(time_step)
-            data_to_save['times'].append(torch.tensor([t_now_and_next[0]]))
-            data_to_save['predicted_state'].append(predicted_state.cpu())
+            if self.save_data:
+                data_to_save['time_step'].append(time_step)
+                data_to_save['times'].append(torch.tensor([t_now_and_next[0]]))
+                data_to_save['predicted_state'].append(predicted_state.cpu())
 
             self.time_step = time_step
-            if hasattr(self.model.cfg, 'diffusion_path') and isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
-                self.model.diffusion_path.set_previous_posterior(predicted_state.to(self.dataset.device))
 
             # tensors that may need to be moved to a device
             # keep these out of the timing
@@ -420,6 +422,8 @@ class PredictedStatesAndObservation(IterableDataset):
                     sampled_state = (
                         sampled_state_mean + self.model.inflation_scale(sampled_state_centered) * sampled_state_centered
                     )
+                if hasattr(self.model.cfg, 'diffusion_path') and isinstance(self.model.cfg.diffusion_path, conf.diffusion_path.PreviousPosteriorToPredictive):
+                    self.model.diffusion_path.set_previous_posterior(sampled_state)
             self.dataset.current_predicted_state = sampled_state
 
             log_time_step_time_end = time.process_time()
@@ -432,7 +436,7 @@ class PredictedStatesAndObservation(IterableDataset):
                 ), step=time_step + 1)
 
             is_last_time_step = time_step == self.dataset.cfg.time_step_count - 1
-            if (
+            if self.save_data and (
                 self.dataset.cfg.save_data_every_n_time_steps is not None and time_step > 0 and time_step % self.dataset.cfg.save_data_every_n_time_steps == 0
                 or
                 is_last_time_step

@@ -83,6 +83,7 @@ def main(cfg):
     dataset = datasets.PredictedStatesAndObservation(
         dynamics, model,
         logger=dataset_logger,
+        save_data=False,
         data_to_save_callback=lambda time_step, data_to_save: datasets.save_trajectories(
             cfg.dataset, data_to_save,
             cfg.run_dir/(f'{cfg.prediction_filename}.{time_step}.parquet' if cfg.dataset.save_data_every_n_time_steps is not None else f'{cfg.prediction_filename}.parquet')
