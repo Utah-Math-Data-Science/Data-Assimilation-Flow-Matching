@@ -10,10 +10,10 @@ predicted_state_initial_condition_std: 1.
 
 predicted_state_count: 20
 
-time_step_count: 700
-time_step_size: 1e-3
+time_step_count: 6000
+time_step_size: 1e-4
 
-observe_every_n_time_steps: 10
+observe_every_n_time_steps: 100
 
 integrator: RUNGE_KUTTA_4  # not true, but this setting enforces that model noise is zero
 
