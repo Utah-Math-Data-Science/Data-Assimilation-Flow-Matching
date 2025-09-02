@@ -1,0 +1,6 @@
+defaults:
+  - EnsembleKalmanFilterPerturbedObservationsIterative
+  - _self_
+
+inflation_scale:
+  constant: 1.4
