@@ -5,6 +5,30 @@ import duckdb
 import polars as pl
 
 
+MODEL_ORDER = {
+    'EnSF': 0,
+    'EnFF-OT': 1,
+    'EnFF-F2P': 2,
+    'BPF': 3,
+    'EnKF-PO': 4,
+    'iEnKF-PO': 5,
+    'ESRF': 6,
+    'LETKF': 7,
+}
+
+
+MODEL_PALETTE = {
+    'EnSF': 'tab:gray',
+    'EnFF-OT': 'tab:orange',
+    'EnFF-F2P': 'tab:red',
+    'BPF': 'tab:olive',
+    'EnKF-PO': 'tab:pink',
+    'iEnKF-PO': 'black',
+    'ESRF': 'tab:purple',
+    'LETKF': 'tab:green',
+}
+
+
 def save_all_subfigures(plot, plot_name, format='pdf', renaming=None, metadata_dataframe=None):
     if metadata_dataframe is not None:
         metadata_dataframe.write_csv(f'{plot_name}.csv')
