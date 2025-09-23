@@ -1,0 +1,10 @@
+source ~/.bashrc
+job_slot_to_gpu=(-1 0)
+
+# Classical
+# KuramotoSivashinsky
+env_parallel --eta -j 1 --header : CUDA_VISIBLE_DEVICES='${job_slot_to_gpu[{%}]}' python src/dafm/main.py dataset=KuramotoSivashinsky dataset.state_dimension=512 model={model} model.inflation_scale.constant={inflation} ::: model BootstrapParticleFilter EnsembleKalmanFilterPerturbedObservationsIterative ::: $(duckdb runs.sqlite -c "copy (select * from sweep_classical_inflation) to '/dev/stdout'")
+env_parallel --eta -j 1 --header : CUDA_VISIBLE_DEVICES='${job_slot_to_gpu[{%}]}' python src/dafm/main.py dataset=KuramotoSivashinsky dataset.state_dimension=512 model={model} model.inflation_scale.constant={inflation} model.loc_radius_gc={localization} ::: model EnsembleKalmanFilterPerturbedObservations EnsembleRandomizedSquareRootFilter LocalEnsembleTransformKalmanFilter ::: $(duckdb runs.sqlite -c "copy (select * from sweep_classical_inflation) to '/dev/stdout'") ::: $(duckdb runs.sqlite -c "copy (select * from sweep_classical_localization) to '/dev/stdout'")
+# NavierStokes
+env_parallel --eta -j 1 --header : CUDA_VISIBLE_DEVICES='${job_slot_to_gpu[{%}]}' python src/dafm/main.py dataset=NavierStokesDim64 model={model} model.inflation_scale.constant={inflation} ::: model BootstrapParticleFilter EnsembleKalmanFilterPerturbedObservationsIterative ::: $(duckdb runs.sqlite -c "copy (select * from sweep_classical_inflation) to '/dev/stdout'")
+env_parallel --eta -j 1 --header : CUDA_VISIBLE_DEVICES='${job_slot_to_gpu[{%}]}' python src/dafm/main.py dataset=NavierStokesDim64 model={model} model.inflation_scale.constant={inflation} model.loc_radius_gc={localization} ::: model EnsembleKalmanFilterPerturbedObservationsIterative EnsembleKalmanFilterPerturbedObservations EnsembleRandomizedSquareRootFilter LocalEnsembleTransformKalmanFilter ::: $(duckdb runs.sqlite -c "copy (select * from sweep_classical_inflation) to '/dev/stdout'") ::: $(duckdb runs.sqlite -c "copy (select * from sweep_classical_localization) to '/dev/stdout'")
