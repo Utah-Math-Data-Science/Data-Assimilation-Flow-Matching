@@ -28,7 +28,7 @@ Installation
 
       pytest tests
 
-#. Edit the ``out_dir`` and ``run_subdir`` fields of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the model training output to be saved.
+#. Edit the ``out_dir`` and ``run_subdir`` fields of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the output of every experiment to be saved.
 
 Supplementary Documentation
 ===========================
@@ -57,16 +57,13 @@ where:
    * ``Lorenz63``: Three-dimensional chaotic butterfly attractor system.
    * ``Lorenz96Bao2024ML``: :math:`N`-dimensional chaotic system with parameters from [Bao2024a]_.
    * ``Lorenz96Bao2024EnSF``: :math:`N`-dimensional chaotic system with parameters from [Bao2024b]_.
-   * ``Lorenz96H100``: `Lorenz96` with a set of parameters with difficulty rating `H100`.
-   * ``Lorenz96H200``: `Lorenz96` with a set of parameters with difficulty rating `H200`.
-   * ``Lorenz96H300``: `Lorenz96` with a set of parameters with difficulty rating `H300`.
 
 * ``<model>`` is one of:
 
    * ``ScoreMatching``: The score matching filter described in [Bao2024a]_ and trains a model every time step.
 
       * The default parameters are for ``dataset=DoubleWell``.
-        Use ``ScoreMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``ScoreMatchingLorenz96`` for ``Lorenz96H***``.
+        Use ``ScoreMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``.
 
    * ``ScoreMatchingMarginal``: EnSF described in [Bao2024b]_.
 
@@ -75,7 +72,7 @@ where:
    * ``FlowMatching``: Our flow matching filter that trains a model every time step.
 
       * The default parameters are for ``dataset=DoubleWell``.
-        Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``, and ``FlowMatchingLorenz96`` for ``Lorenz96H***``.
+        Use ``FlowMatchingLorenz96Bao2024ML`` for ``Lorenz96Bao2024ML``.
 
    * ``FlowMatchingMarginal``: Our EnFF methods that approximates the flow matching vector field using a Monte Carlo approximation.
 
@@ -87,19 +84,13 @@ where:
 
    * ``BootstrapParticleFilter``
 
-      * Variants available: ``BootstrapParticleFilterKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``BootstrapParticleFilterNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
-
    * ``EnsembleKalmanFilterPerturbedObservations``
 
-      * Variants available: ``EnsembleKalmanFilterPerturbedObservationsKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``EnsembleKalmanFilterPerturbedObservationsNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
+   * ``EnsembleKalmanFilterPerturbedObservationsIterative``
 
    * ``EnsembleRandomizedSquareRootFilter``: Known as the Ensemble Square Root Filter.
 
-      * Variants available: ``EnsembleRandomizedSquareRootFilterKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``EnsembleRandomizedSquareRootFilterNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
-
    * ``LocalEnsembleTransformKalmanFilter``
-
-      * Variants available: ``LocalEnsembleTransformKalmanFilterKuramotoSivashinsky`` for hyperparameters tuned for the Kuramoto-Sivashinsky equation, and ``LocalEnsembleTransformKalmanFilterNavierStokes`` for hyperparameters tuned for the Navier-Stokes equation.
 
 * ``<other_overrides>...``: Other overrides for the model.
    Add the flag ``-c job`` to the Python command see what can be overridden from the command line.
@@ -143,27 +134,46 @@ The following are example commands to show how to run the code.
 
 .. code:: bash
 
-   # Run EnFF-OT for Kuramoto-Sivashinsky with a grid of size 256
-   python src/dafm/main.py dataset=KuramotoSivashinsky dataset.state_dimension=256 model=FlowMatchingMarginalConditionalOptimalTransport model/guidance=LocalConstant model.guidance.schedule.constant=1 model.sampling_time_step_count=20
-   # Run EnFF-F2P for Navier-Stokes with a grid of size 64x64
-   python src/dafm/main.py rng_seed={rng_seed} dataset=NavierStokesDim64 model=FlowMatchingMarginalPreviousPosteriorToPredictive model/guidance=LocalConstant model.guidance.schedule.constant=.2 model.sampling_time_step_count=50
+   # Run EnFF-F2P for Kuramoto-Sivashinsky with a grid of size 1024
+   python src/dafm/main.py dataset=KuramotoSivashinsky model=FlowMatchingMarginalPreviousPosteriorToPredictive model/guidance=LocalConstant model.guidance.schedule.constant=0.005 model.diffusion_path.sigma_min=1e-3 model.sampling_time_step_count=5
+   # Run EnFF-F2P for Navier-Stokes with a grid of size 256x256
+   python src/dafm/main.py dataset=NavierStokesDim256 model=FlowMatchingMarginalPreviousPosteriorToPredictive model/guidance=LocalConstant model.guidance.schedule.constant=0.001 model.diffusion_path.sigma_min=1e-3 model.sampling_time_step_count=10
 
-Running data assimilation experiments with high-dimensional systems
-===================================================================
+For more examples, see the following bash scripts:
 
-By default, the true system state and observation trajectories are computed to the terminal time and stored on the specified device (see ``Conf.device`` in ``src/conf/conf.py``);
-however, for high-dimensional systems, this can require more RAM than is available when the ``Conf.device == 'cuda'``.
-To work around this, we introduce the configuration setting in ``Dataset.trajectory_stored_on_gpu_max_state_dimension`` in ``src/conf/datsets.py``.
-When ``Dataset.state_dimension > Dataset.trajectory_stored_on_gpu_max_state_dimension``, we store these trajectories as if ``Conf.device == 'cpu'``, then move the PyTorch tensors to ``Conf.device == 'cuda'`` when necessary (e.g., when sampling from a generative model).
+   * ``tune.sh``: Runs a hyperparameter sweep for EnFF-OT, EnFF-F2P, and EnSF.
 
-Also, by default, all the particle states are saved to a `.parquet` file once the experiment is complete.
-For high-dimensional systems, this can be many gigabytes of data.
-Use ``Dataset.save_only_mean_std`` to save the mean and standard deviation of the particles for each time step and dimension.
+   * ``tune_classical.sh``: Runs a hyperparameter sweep for the classical methods (e.g., EnKF).
 
-.. warning::
+   * ``test_best.sh``: Evaluates EnFF-OT, EnFF-F2P, and EnSF using the best hyperparameters.
 
-   Due to a bug in ``hydra-orm``, the configuration settings mentioned here must be edited in their respective Python files.
-   Command line overrides for these settings will be ignored.
+   * ``test_best_classical_comparison.sh``: Evaluates all methods using the best hyperparameters for the datasets used in the comparison with classical methods.
+
+To run these scripts, install `GNU parallel <https://www.gnu.org/software/parallel/>`_.
+Once installed, replace ``--eta -j 1`` with ``--dry-run`` in the bash scripts to generate many example commands.
+
+Processing experiment output
+============================
+
+We provide Jupyter notebooks in the notebooks directory to process the experiment output:
+
+   * ``tune.ipynb``: Notebook for compiling the results of a hyperparameter sweep for EnFF-OT, EnFF-F2P, and EnSF, or a hyperparameter sweep for the comparison with classical methods.
+     See ``tune.sh`` and ``tune_classical.sh`` to run these hyperparameter sweeps.
+     It saves a CSV file containing the best hyperparameters in the ``sweeps`` directory.
+
+   * ``logged_metrics.ipynb``: Notebook for producing Figure 2.
+     See ``test_best.sh`` to produce the data for this figure.
+
+   * ``sensitivity.ipynb``: Notebook for producing the ablation study figure for EnFF-OT and EnFF-F2P (Figure 6).
+     See ``tune.sh`` to produce the data for this figure.
+
+   * ``classical_comparison.ipynb``: Notebook for producing Figure 5.
+     See ``test_best_classical_comparison.sh`` to produce the data for this figure.
+
+   * ``datasets_*.ipynb``: Notebooks for visualizing the dynamical systems used in the paper.
+
+   * ``trajectories_*.ipynb``: Notebooks for visualizing the estimated dynamical system states produced by each model.
+     Set ``save_data=True`` in ``src/dafm/main.py`` on line 86 to save the estimated states before running the model to save the estimated states.
 
 Running data assimilation experiments in parallel
 =================================================
