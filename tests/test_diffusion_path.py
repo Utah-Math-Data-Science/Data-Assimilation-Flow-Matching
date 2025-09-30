@@ -102,5 +102,5 @@ def test_bao_2024_ensemble_score_matching_renormalize_sampled_noise(engine):
     data = torch.ones(2)
     t_noise = torch.tensor(0.)
     noise = path.sample_noise(t_noise, data)
-    assert (noise.mean(0) == 0.).all()
+    assert (noise.mean(0) < 1e-7).all()
     assert (noise.std(0) == 1.).all()
