@@ -1,7 +1,7 @@
 Ensemble Flow Filter
 ====================
 
-Code for replicating the results in *`Flow Matching for Efficient and Scalable Data Assimilation <https://arxiv.org/abs/2508.13313>`_*.
+Code for replicating the results in `Flow Matching for Efficient and Scalable Data Assimilation <https://arxiv.org/abs/2508.13313>`_.
 
 Installation
 ============
