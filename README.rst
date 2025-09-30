@@ -55,7 +55,7 @@ where:
 
    * ``Lorenz96Bao2024EnSF``: :math:`N`-dimensional chaotic system with parameters from [Bao2024b]_.
    * ``KuramotoSivashinsky``: 1-dimensional chaotic Kuramoto-Sivashinsky PDE.
-   * ``NavierStokesDim256``: Navier-Stokes PDE with periodic boundary conditions discretized on a :math:`256 \times 256` grid.
+   * ``NavierStokesDim256``: Navier-Stokes PDE with periodic boundary conditions discretized on a :math:`256x256` grid.
 
 * ``<model>`` is one of:
 
