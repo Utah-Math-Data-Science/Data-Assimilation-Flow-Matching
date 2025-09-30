@@ -1,5 +1,5 @@
-Ensemble Flow Filter
-====================
+Data Assimilation with Flow Matching: The Ensemble Flow Filter
+==============================================================
 
 Code for replicating the results in `Flow Matching for Efficient and Scalable Data Assimilation <https://arxiv.org/abs/2508.13313>`_.
 
