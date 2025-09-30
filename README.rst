@@ -53,10 +53,9 @@ where:
 
 * ``<dataset>`` is one of:
 
-   * ``DoubleWell``: One-dimensional potential well system from [Bao2024a]_.
-   * ``Lorenz63``: Three-dimensional chaotic butterfly attractor system.
-   * ``Lorenz96Bao2024ML``: :math:`N`-dimensional chaotic system with parameters from [Bao2024a]_.
    * ``Lorenz96Bao2024EnSF``: :math:`N`-dimensional chaotic system with parameters from [Bao2024b]_.
+   * ``KuramotoSivashinsky``: 1-dimensional chaotic Kuramoto-Sivashinsky PDE.
+   * ``NavierStokesDim256``: Navier-Stokes PDE with periodic boundary conditions discretized on a :math:`256 \times 256` grid.
 
 * ``<model>`` is one of:
 
