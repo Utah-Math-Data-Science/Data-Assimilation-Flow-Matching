@@ -5,7 +5,7 @@ import hydra_orm.utils
 from hydra_orm import orm
 import sqlalchemy as sa
 
-import conf.diffusion_path
+import conf.prob_path
 
 
 class EnergyGuidance(orm.InheritableTable):
@@ -19,11 +19,11 @@ class No(EnergyGuidance):
 
 class MonteCarlo(EnergyGuidance):
     defaults: List[Any] = hydra_orm.utils.make_defaults_list([
-        dict(diffusion_path=omegaconf.MISSING),
+        dict(prob_path=omegaconf.MISSING),
         '_self_',
     ])
-    sample_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=1024)
-    diffusion_path = orm.OneToManyField(conf.diffusion_path.DiffusionPath, default=omegaconf.MISSING)
+    sample_count: int = orm.make_field(orm.ColumnRequired(sa.Integer), default=omegaconf.MISSING)
+    prob_path = orm.OneToManyField(conf.prob_path.ProbPath, default=omegaconf.MISSING)
 
 
 class Schedule(orm.InheritableTable):
@@ -31,7 +31,7 @@ class Schedule(orm.InheritableTable):
 
 
 class Constant(Schedule):
-    constant: float = orm.make_field(orm.ColumnRequired(sa.Double), default=1)
+    constant: float = orm.make_field(orm.ColumnRequired(sa.Double), default=omegaconf.MISSING)
 
 
 class Local(EnergyGuidance):

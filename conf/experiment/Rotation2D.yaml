@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - override /dataset@setting.dataset: DynamicalSystemImpl
+  - override /dataset/system@setting.dataset.system: Rotation2D
+  - override /splitter@setting.splitter: OneSplit
+  - _self_
+
+setting:
+  dataset:
+    time_step_count: ${add:${..splitter.start_train},${mul:${..observe_every_n_time_steps},50}}
+    system:
+      time_step_size: 1.
+      radius: 2.
+  splitter:
+    start_train: 0
+    len_train: ${sub:${..dataset.time_step_count},${.start_train}}
+  obs_noise_std: .5
+  observe_every_n_time_steps: 1
+  observes:
+    - _target_: conf.observe.ObserveIdentity
+      order: 0
+filter:
+  ensemble_initial_std: 1.

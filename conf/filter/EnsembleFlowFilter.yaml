@@ -1,0 +1,3 @@
+defaults:
+  - _EnsembleFlowFilter
+  - _self_

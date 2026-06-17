@@ -1,0 +1,5 @@
+defaults:
+  - _KalmanFilter
+  - _self_
+
+ensemble_size: 1

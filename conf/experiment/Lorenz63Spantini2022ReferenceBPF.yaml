@@ -1,0 +1,9 @@
+# @package _global_
+defaults:
+  - Lorenz63Spantini2022
+  - override /filter: _BootstrapParticleFilter
+
+filter:
+  ensemble_size: 1000000
+  inflation_scale: 1.0
+  model_noise_std: 1e-2

@@ -1,0 +1,5 @@
+defaults:
+  - _AddNoiseToObservationFilter
+  - _self_
+
+ensemble_initial_std: 0.

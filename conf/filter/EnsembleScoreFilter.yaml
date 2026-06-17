@@ -1,0 +1,5 @@
+defaults:
+  - _EnsembleScoreFilter
+  - _self_
+
+sampling_max_score_norm: 1000

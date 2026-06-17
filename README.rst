@@ -3,6 +3,7 @@ Data Assimilation with Flow Matching: The Ensemble Flow Filter
 
 Code for replicating the results in `Flow Matching for Efficient and Scalable Data Assimilation <https://arxiv.org/abs/2508.13313>`_.
 
+
 Installation
 ============
 
@@ -28,46 +29,51 @@ Installation
 
    .. code:: bash
 
-      pytest tests
+      uv run pytest tests
 
 #. Edit the ``out_dir`` and ``run_subdir`` fields of the ``Conf`` class in ``src/conf/conf.py`` to the directory where you want the output of every experiment to be saved.
+
 
 Supplementary Documentation
 ===========================
 
-* `Hydra <https://hydra.cc/docs/1.3/intro/>`_: Command-line inferface configuration library for configuring the experiments in this project.
+* `Hydra <https://hydra.cc/docs/1.3/intro/>`_: Command-line interface configuration library for configuring the experiments in this project.
 * `Hydra ORM <https://github.com/reepoi/hydra-orm>`_: Library for saving experiment configurations to an `SQLite <https://sqlite.org/>`_ database.
 * `PyTorch <https://pytorch.org/docs/2.4/index.html>`_: Library for implementing the models.
 * `PyTorch Lightning <https://lightning.ai/docs/pytorch/2.5.0/>`_: Library for handling model training.
 
-Running the data assilimation algorithms
+
+Running the data assimilation algorithms
 ========================================
 
-Examples for the running the code are in the ``Examples`` subsection.
+Examples for running the code are in the ``Examples`` subsection.
 
 Run the command
 
 .. code:: bash
 
-   python src/dafm/main.py dataset=<dataset> model=<model> <other_overrides>...
+   python src/dafm/main.py +experiment=<experiment> filter=<filter> <other_overrides>...
 
 where:
 
-* ``<dataset>`` is one of:
+* ``<experiment>`` is one of:
 
-   * ``Lorenz96Bao2024EnSF``: :math:`N`-dimensional chaotic system with parameters from [Bao2024b]_.
-   * ``KuramotoSivashinsky``: 1-dimensional chaotic Kuramoto-Sivashinsky PDE.
-   * ``NavierStokesDim256``: Navier-Stokes PDE with periodic boundary conditions discretized on a :math:`256x256` grid.
+   * ``Lorenz63Spantini2022``
+   * ``Lorenz96Bao2024``
+   * ``KuramotoSivashinsky``
+   * ``NavierStokesDim16Slow`` / ``NavierStokesDim64Slow`` / ``NavierStokesDim256``
 
-* ``<model>`` is one of:
+* ``<filter>`` is one of:
 
-   * ``ScoreMatchingMarginal``: EnSF described in [Bao2024b]_.
+   * ``EnsembleFlowFilter``: EnFF methods.
 
-      * Variants available: ``ScoreMatchingMarginalBao2024EnSF``
+      * Typical overrides: ``filter/prob_path=<prob_path>`` and ``filter/guidance=LocalConstant``.
 
-   * ``FlowMatchingMarginal``: Our EnFF methods that approximates the flow matching vector field using a Monte Carlo approximation.
+      * ``<prob_path>`` is usually one of ``ConditionalOptimalTransport`` or ``FilteringToPredictive``.
 
-      * Variants available: ``FlowMatchingMarginalConditionalOptimalTransport`` for EnFF-OT and ``FlowMatchingMarginalPreviousPosteriorToPredictive`` for EnFF-F2P.
+   * ``EnsembleScoreFilter``: EnSF described in [Bao2024]_.
+
+      * Typical override: ``filter/prob_path=Bao2024EnsembleScoreMatching``.
 
    * ``BootstrapParticleFilter``
 
@@ -79,97 +85,100 @@ where:
 
    * ``LocalEnsembleTransformKalmanFilter``
 
-* ``<other_overrides>...``: Other overrides for the model.
-   Add the flag ``-c job`` to the Python command see what can be overridden from the command line.
+* ``<other_overrides>...``: Other overrides for the experiment.
+   Add the flag ``-c job`` to the Python command to see what can be overridden from the command line.
    Some useful overrides include:
 
-   * Changing the diffusion path:
+   * For EnFF and EnSF, selecting a probability path:
 
       .. code:: bash
 
-         model/diffusion_path=VarianceExploding
+         filter/prob_path=<prob_path>
 
-   * For the flow matching models, changing the guidance vector field approximation:
+   * For EnFF, changing the guidance vector field approximation:
 
       .. code:: bash
 
-         model/guidance=<guidance>
+         filter/guidance=<guidance>
 
       where ``<guidance>`` is one of:
 
-         * ``MonteCarlo*``: the Monte Carlo approximation from section 3.2 of [Feng2025]_.
-            * Variants available: ``MonteCarloTargetConditionalOptimalTransport``
          * ``Local*``: the local approximation from section 3.3 of [Feng2025]_.
             * Variants available: ``LocalConstant``
 
-   * Using particle noise perturbation:
+   * Changing the number of sampling steps used by EnFF/EnSF:
 
       .. code:: bash
 
-         model.use_state_perturbation=true model.state_perturbation_std=0.5
+         filter.sampling_time_step_count=10
 
-   * Using particle inflation:
+   * Reusing a precomputed reference filter:
 
       .. code:: bash
 
-         model/inflation_scale=ConstantScale model.inflation_scale.constant=1.01
+         setting.reference_filter=<reference_filter_alt_id>
 
 Examples
 --------
 
 The following are example commands to show how to run the code.
+The hyperparameter override values in these examples were found using Optuna sweeps for the corresponding settings.
 
 .. code:: bash
 
-   # Run EnFF-F2P for Kuramoto-Sivashinsky with a grid of size 1024
-   python src/dafm/main.py dataset=KuramotoSivashinsky model=FlowMatchingMarginalPreviousPosteriorToPredictive model/guidance=LocalConstant model.guidance.schedule.constant=0.005 model.diffusion_path.sigma_min=1e-3 model.sampling_time_step_count=5
-   # Run EnFF-F2P for Navier-Stokes with a grid of size 256x256
-   python src/dafm/main.py dataset=NavierStokesDim256 model=FlowMatchingMarginalPreviousPosteriorToPredictive model/guidance=LocalConstant model.guidance.schedule.constant=0.001 model.diffusion_path.sigma_min=1e-3 model.sampling_time_step_count=10
+   # Run EnFF-F2P for Kuramoto-Sivashinsky with ATan observations
+   python src/dafm/main.py +experiment=KuramotoSivashinsky filter=EnsembleFlowFilter filter/prob_path=FilteringToPredictive filter/guidance=LocalConstant filter.sampling_time_step_count=5 filter.prob_path.sigma_min=0.005263515825015734 filter.guidance.schedule.constant=0.006935310286542734
+
+   # Run EnFF-F2P for Navier-Stokes with ATan observations
+   python src/dafm/main.py +experiment=NavierStokesDim256 filter=EnsembleFlowFilter filter/prob_path=FilteringToPredictive filter/guidance=LocalConstant filter.sampling_time_step_count=10 filter.prob_path.sigma_min=0.00027422730673253964 filter.guidance.schedule.constant=0.0010076278359930006
+
+   # Run EnSF for Kuramoto-Sivashinsky with identity observations
+   python src/dafm/main.py +experiment=KuramotoSivashinsky filter=EnsembleScoreFilter filter/prob_path=Bao2024EnsembleScoreMatching filter.sampling_time_step_count=5 filter.prob_path.epsilon_alpha=0.8889480892914582 filter.prob_path.epsilon_beta=0.07766590666645484 "setting.observes=[{_target_:conf.observe.ObserveIdentity,order:0}]" setting.obs_noise_std=.5
+
+   # Run Optuna sweep for EnFF on Kuramoto-Sivashinsky
+   python src/dafm/main_optuna.py +experiment=KuramotoSivashinsky filter=EnsembleFlowFilter filter/prob_path=FilteringToPredictive filter/guidance=LocalConstant filter.sampling_time_step_count=5 "optuna_trial_params=[{override:filter.prob_path.sigma_min,type:float,min:1e-5,max:1,log:true},{override:filter.guidance.schedule.constant,type:float,min:1e-3,max:10,log:true}]"
+
+   # Re-run an existing config with a new rng seed
+   python src/dafm/rerun_from_alt_id.py --base-alt-id <alt_id> --rng-seed <rng_seed> --save-ensemble-stats true
 
 For more examples, see the following bash scripts:
 
-   * ``tune.sh``: Runs a hyperparameter sweep for EnFF-OT, EnFF-F2P, and EnSF.
+   * ``sweeps/lorenz63spantini2022/*.sh``: Lorenz63 experiments (EnFF/EnSF/classical/optuna/reference).
 
-   * ``tune_classical.sh``: Runs a hyperparameter sweep for the classical methods (e.g., EnKF).
+   * ``sweeps/kuramotosivashinsky/*.sh`` and ``sweeps/navierstokesdim256/*.sh``: dataset-specific sweeps.
 
-   * ``test_best.sh``: Evaluates EnFF-OT, EnFF-F2P, and EnSF using the best hyperparameters.
+   * ``sweeps/tune_classical.sh`` and ``sweeps/tune_enkf_letkf.sh``: classical filter sweeps.
 
-   * ``test_best_classical_comparison.sh``: Evaluates all methods using the best hyperparameters for the datasets used in the comparison with classical methods.
+   * ``sweeps/rerun.sh``: rerun configurations from existing ``alt_id`` values.
+
+   * ``sweeps/benchmark.sh``: benchmark saved runs by ``alt_id``.
 
 To run these scripts, install `GNU parallel <https://www.gnu.org/software/parallel/>`_.
 Once installed, replace ``--eta -j 1`` with ``--dry-run`` in the bash scripts to generate many example commands.
+
 
 Processing experiment output
 ============================
 
 We provide Jupyter notebooks in the notebooks directory to process the experiment output:
 
-   * ``tune.ipynb``: Notebook for compiling the results of a hyperparameter sweep for EnFF-OT, EnFF-F2P, and EnSF, or a hyperparameter sweep for the comparison with classical methods.
-     See ``tune.sh`` and ``tune_classical.sh`` to run these hyperparameter sweeps.
-     It saves a CSV file containing the best hyperparameters in the ``sweeps`` directory.
+   * ``notebooks/OptunaHyperparams.ipynb``: Analyze Optuna sweep results and compare best hyperparameters across settings using ``runs.sqlite`` and ``optuna.sqlite``.
 
-   * ``logged_metrics.ipynb``: Notebook for producing Figure 2.
-     See ``test_best.sh`` to produce the data for this figure.
+   * ``notebooks/AblationSamplingTimeStepCount.ipynb``: Analyze sensitivity to ``filter.sampling_time_step_count`` for EnFF and EnSF runs, and compare with classical filters.
 
-   * ``sensitivity.ipynb``: Notebook for producing the ablation study figure for EnFF-OT and EnFF-F2P (Figure 6).
-     See ``tune.sh`` to produce the data for this figure.
+   * ``notebooks/AblationTimeBetweenObs.ipynb``: Analyze sensitivity to ``setting.observe_every_n_time_steps`` for ``Lorenz63Spantini2022``.
 
-   * ``classical_comparison.ipynb``: Notebook for producing Figure 5.
-     See ``test_best_classical_comparison.sh`` to produce the data for this figure.
+   * ``notebooks/BenchmarkTiming.ipynb``: Summarize runtime benchmarks from ``sweeps/benchmark_*.csv`` together with run metadata.
+      Use ``sweeps/benchmark.sh`` to generate benchmark outputs.
 
-   * ``datasets_*.ipynb``: Notebooks for visualizing the dynamical systems used in the paper.
+   * ``notebooks/KalmanRotation2D.ipynb``: Visualize Rotation2D dynamics comparing the Kalman filter and EnFF-F2P.
 
-   * ``trajectories_*.ipynb``: Notebooks for visualizing the estimated dynamical system states produced by each model.
-     Set ``save_data=True`` in ``src/dafm/main.py`` on line 86 to save the estimated states before running the model to save the estimated states.
+   * ``notebooks/trajectories_KuramotoSivashinsky.ipynb`` and ``notebooks/trajectories_NavierStokes.ipynb``: Visualize reconstructed trajectories from saved data assimilation runs.
+      Use the override ``save_ensemble_stats=true`` to save the reconstructed trajectories.
+
 
 Running data assimilation experiments in parallel
 =================================================
-
-.. warning::
-
-   On network file systems (NFS), starting multiple processes running this code can corrupt the SQLite database storing the experiment configurations.
-   See question (5) of the `SQLite FAQs <https://sqlite.org/faq.html>`_.
-   See the Preflight section below to see how to ensure the experiment configurations are written to the database serially.
 
 Using `GNU parallel <https://www.gnu.org/software/parallel/>`_, multiple experiments can be run in parallel.
 
@@ -178,20 +187,8 @@ Using `GNU parallel <https://www.gnu.org/software/parallel/>`_, multiple experim
    parallel --eta --header : python src/dafm/main.py <override_1>={<param_1>} <override_2>={<param_2>} ... ::: <param_1> <p1value_1> <p1value_2> ... ::: <param_2> <p2value_1> <p2value_2> ...
 
 
-Preflight
----------
-
-To ensure that experiment configurations are saved to the database serially, run GNU parallel command with ``-j 1`` and the Python command with ``-c job``.
-
-.. code:: bash
-
-   parallel -j 1 --eta --header : python src/dafm/main.py -c job <override_1>={<param_1>} <override_2>={<param_2>} ... ::: <param_1> <p1value_1> <p1value_2> ... ::: <param_2> <p2value_1> <p2value_2> ...
-
-Once this command has finished, all the experiment configurations have been saved.
-Next, run the first GNU parallel command to begin running the experiments in parallel.
-
 References
 ==========
 
-.. [Bao2024b] `F. Bao, Z. Zhang, and G. Zhang, "An ensemble score filter for tracking high-dimensional nonlinear dynamical systems," Computer Methods in Applied Mechanics and Engineering, vol. 432, p. 117447, Dec. 2024, doi: 10.1016/j.cma.2024.117447. <https://www.sciencedirect.com/science/article/pii/S0045782524007023>`_
+.. [Bao2024] `F. Bao, Z. Zhang, and G. Zhang, "An ensemble score filter for tracking high-dimensional nonlinear dynamical systems," Computer Methods in Applied Mechanics and Engineering, vol. 432, p. 117447, Dec. 2024, doi: 10.1016/j.cma.2024.117447. <https://www.sciencedirect.com/science/article/pii/S0045782524007023>`_
 .. [Feng2025] `R. Feng, T. Wu, C. Yu, W. Deng, and P. Hu, "On the Guidance of Flow Matching," Feb. 04, 2025, arXiv: arXiv:2502.02150. doi: 10.48550/arXiv.2502.02150. <http://arxiv.org/abs/2502.02150>`_

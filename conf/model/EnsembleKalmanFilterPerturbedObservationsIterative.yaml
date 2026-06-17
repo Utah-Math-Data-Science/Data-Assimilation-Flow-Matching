@@ -1,4 +1,0 @@
-defaults:
-  - _EnsembleKalmanFilterPerturbedObservationsIterative
-  - override inflation_scale: ConstantScale
-  - _self_

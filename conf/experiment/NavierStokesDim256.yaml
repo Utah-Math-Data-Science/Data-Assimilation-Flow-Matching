@@ -1,0 +1,25 @@
+# @package _global_
+defaults:
+  - override /dataset@setting.dataset: DynamicalSystemImpl
+  - override /dataset/system@setting.dataset.system: NavierStokes2DPeriodicBoundary
+  - override /splitter@setting.splitter: OneSplit
+  - _self_
+
+setting:
+  dataset:
+    time_step_count: ${add:${..splitter.start_train},${mul:${..observe_every_n_time_steps},60}}
+    system:
+      time_step_size: 1e-4
+      grid_horizontal_count: 256
+      grid_vertical_count: 256
+  splitter:
+    start_train: 1
+    len_train: ${sub:${..dataset.time_step_count},${.start_train}}
+  obs_noise_std: .1
+  observe_every_n_time_steps: 100
+  observes:
+    - _target_: conf.observe.ObserveATan
+      order: 0
+filter:
+  ensemble_size: 20
+  ensemble_initial_std: 1.

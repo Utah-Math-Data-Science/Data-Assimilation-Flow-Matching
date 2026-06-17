@@ -1,129 +1,179 @@
-import logging
-import os
 import pprint
 import sys
+import time
 
-from einops import reduce
 import hydra
 from omegaconf import OmegaConf
 import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import DataLoader, IterableDataset
 import lightning.pytorch as pl
-from pytorch_lightning.utilities import CombinedLoader
+from einops import rearrange, reduce
 
-from conf import conf
-from dafm import callbacks, datasets, loggers, models, utils
+import conf.conf
+import conf.prob_path
+import dafm.callbacks
+import dafm.datasets
+import dafm.filters
+import dafm.loggers
+import dafm.observe
+import dafm.utils
+
+log = dafm.utils.getLoggerByFilename(__file__)
 
 
-log = logging.getLogger(__file__)
+class ObservationCollector(IterableDataset):
+    def __init__(self, cfg, rng: np.random.Generator, device, dataset, observe):
+        super().__init__()
+        self.cfg = cfg
+        (
+            self.rng_initial_condition,
+            self.rng_obs_noise,
+        ) = rng.spawn(2)
+        self.device = device
+        self.dataset = dataset
+        self.observe = observe
+
+    def __len__(self):
+        return len(self.cfg.setting.observation_time_steps)
+
+    @torch.no_grad()
+    def __iter__(self):
+        true_initial_condition = self.dataset[getattr(self.cfg.setting.splitter, f'start_{self.cfg.setting.split}')]
+        if self.cfg.setting.ensemble_initial_mean_is_true_state:
+            loc = true_initial_condition
+        else:
+            loc = torch.zeros_like(true_initial_condition)
+        self.filtering_ensemble = torch.tensor(self.rng_initial_condition.normal(
+            loc=loc.numpy(), scale=self.cfg.filter.ensemble_initial_std,
+            size=(self.cfg.filter.ensemble_size, *true_initial_condition.shape),
+        ), device=self.device, dtype=true_initial_condition.dtype)
+        previous_time_step = getattr(self.cfg.setting.splitter, f'start_{self.cfg.setting.split}')
+        for time_step in self.cfg.setting.observation_time_steps:
+            predictive_ensemble = self.dataset.integrate(previous_time_step, time_step, self.filtering_ensemble)[-1]
+            data = self.dataset[time_step][None].to(self.device)
+            observation = self.observe(data)
+            observation = observation + self.observe.get_sparsity_mask(device=self.device) * torch.tensor(self.rng_obs_noise.normal(
+                scale=self.cfg.setting.obs_noise_std, size=observation.shape
+            ), device=self.device, dtype=observation.dtype)
+
+            yield dict(
+                time_step=time_step,
+                gt=data,
+                predictive_ensemble=predictive_ensemble,
+                observation=observation,
+            )
+
+            previous_time_step = time_step
 
 
 class DataAssimilation(pl.LightningModule):
-    def __init__(self, cfg, dataset, model):
+    def __init__(self, cfg, dataset, filter):
         super().__init__()
-        self.automatic_optimization = False
-
         self.cfg = cfg
         self.dataset = dataset
-        self.dataset_iterable = None
-        self.model = model
+        self.filter = filter
 
-    def configure_optimizers(self):
-        return None
+    def prepare_data(self):
+        self.dataset.dataset.prepare_data()
 
     def setup(self, stage):
-        if stage == 'fit':
-            self.dataset_iterable = iter(self.dataset)
+        self.dataset.dataset.prepare_data()
+        self.dataset.dataset.setup('fit')
 
-    def train_dataloader(self):
-        epoch_count, time_step, time, next_predicted_state, next_observation, ignore_observation = next(self.dataset_iterable)
-        self.optimizer = self.model.get_optimizer(time_step, ignore_observation)
-        return CombinedLoader({
-            epoch: iter(CombinedLoader(dict(
-                    time_step=DataLoader([time_step]),
-                    time=DataLoader([time]),
-                    next_predicted_state=DataLoader(next_predicted_state, batch_size=self.cfg.model.batch_size, shuffle=self.cfg.model.shuffle_training_samples),
-                    next_observation=DataLoader([next_observation]),
-                    ignore_observation=DataLoader([ignore_observation]),
-            ), mode='max_size_cycle'))
-            for epoch in range(epoch_count)
-        }, mode='sequential')
+    def val_dataloader(self):
+        return DataLoader(self.dataset)
 
-    def training_step(self, batch, _):
-        batch, batch_idx, epoch = utils.unpack_batch(batch)
-        self.optimizer.zero_grad()
-        next_observation = batch['next_observation'] if not batch['ignore_observation'] else None
-        losses = self.model.loss(batch['next_predicted_state'], next_observation, self.dataset.dataset.observe)
-        self.manual_backward(losses['loss'])
-        self.optimizer.step()
-        return losses
+    def validation_step(self, data, batch_idx):
+        ensemble = data['predictive_ensemble'][0]
+        ensemble_shape = ensemble.shape
+        observation = data['observation'][0]
+
+        if hasattr(self.cfg.filter, 'prob_path') and isinstance(self.cfg.filter.prob_path, conf.prob_path.FilteringToPredictive):
+            self.filter.prob_path.set_previous_filtering(rearrange(self.dataset.filtering_ensemble, 'member ... -> member (...)'))
+
+        """Data assimilation timing start"""
+        log_da_start = time.process_time()
+
+        self.filter.initialize(self.cfg.setting, rearrange(self.dataset.filtering_ensemble, 'member ... -> member (...)'), self.dataset.dataset)
+
+        ensemble = self.filter.assimilate(
+            data['time_step'],
+            rearrange(ensemble, 'member ... -> member (...)'),
+            rearrange(observation, '1 ... -> 1 (...)'),
+            self.cfg.setting.obs_noise_std,
+            dafm.observe.Unflatten(self.dataset.observe),
+            # lambda e: rearrange(
+            #     self.dataset.observe(e.view(ensemble_shape)),
+            #     'member ... -> member (...)'
+            # ),
+        )
+
+        log_da_end = time.process_time()
+        """Data assimilation timing end"""
+
+        self.dataset.filtering_ensemble = ensemble.view(ensemble_shape)
+        return dict(
+            time_step=data['time_step'],
+            filtering_ensemble=ensemble,
+            true_state=rearrange(data['gt'], '1 ... -> 1 (...)'),
+            observation=observation,
+            da_time_s=log_da_end - log_da_start,
+        )
 
 
-@hydra.main(**utils.HYDRA_INIT)
-def main(cfg):
-    engine = conf.get_engine()
-    conf.orm.create_all(engine)
-    with conf.sa.orm.Session(engine) as db:
-        cfg = conf.orm.instantiate_and_insert_config(db, OmegaConf.to_container(cfg, resolve=True))
+hydra_init = dafm.utils.HYDRA_INIT
+
+
+def run(cfg):
+    with conf.conf.Session() as db:
+        cfg: conf.conf.Conf = conf.conf.orm.instantiate_and_insert_config(db, OmegaConf.to_container(cfg, resolve=True))
         db.commit()
-        log.info('Command: python %s', ' '.join(sys.argv))
+        cmd_args = sys.argv
+        if cmd_args[-1].startswith('hydra.run.dir='):
+            cmd_args = cmd_args[:-1]
+        log.info('Command: python %s', ' '.join(cmd_args))
         log.info(pprint.pformat(cfg))
         log.info('Output directory: %s', cfg.run_dir)
 
-    rng = np.random.default_rng(utils.RNG_RANDBITS[cfg.rng_seed])
-    dynamics = datasets.get_dynamics_dataset(cfg.dataset, rng, cfg.device, delete_true_state=True)
-    pl.seed_everything(cfg.rng_seed)
-    with pl.utilities.seed.isolate_rng():
-        model = models.get_model(cfg.model, cfg.dataset.state_dimension, cfg.dataset.observation_noise_std, dynamics)
-
-    dataset_logger = loggers.CSVLogger(cfg.run_dir, name=None, name_metrics_file='dataset_metrics.csv')
-
-    dataset = datasets.PredictedStatesAndObservation(
-        dynamics, model,
-        logger=dataset_logger,
-        save_data=False,
-        data_to_save_callback=lambda time_step, data_to_save: datasets.save_trajectories(
-            cfg.dataset, data_to_save,
-            cfg.run_dir/(f'{cfg.prediction_filename}.{time_step}.parquet' if cfg.dataset.save_data_every_n_time_steps is not None else f'{cfg.prediction_filename}.parquet')
-        )
+    dataset = dafm.datasets.get_dataset(
+        cfg.setting.dataset,
+        np.random.default_rng(dafm.utils.RNG_RANDBITS[cfg.setting.dataset.rng_seed]['DATASET']),
+        cfg.device,
     )
-    data_assimilation = DataAssimilation(cfg, dataset, model)
 
-    logger = loggers.CSVLogger(cfg.run_dir, name=None)
+    observe = dafm.observe.build_observe(cfg.setting.observes, cfg_dataset=cfg.setting.dataset, rng=np.random.default_rng(dafm.utils.RNG_RANDBITS[cfg.rng_seed]['OBSERVE']))
 
-    cbs = [
-        callbacks.LogStats(),
-        # callbacks.SaveTrajectories(cfg.run_dir, cfg.prediction_filename),
+    da_dataset = ObservationCollector(cfg, np.random.default_rng(dafm.utils.RNG_RANDBITS[cfg.rng_seed]['DATA_ASSIMILATION']), cfg.device, dataset, observe)
+    da_filter = dafm.filters.get_filter(cfg.filter, cfg_dataset=cfg.setting.dataset, rng=np.random.default_rng(dafm.utils.RNG_RANDBITS[cfg.rng_seed]['FILTER']))
+    data_assimilation = DataAssimilation(cfg, da_dataset, da_filter)
+
+    logger = dafm.loggers.CSVLogger(cfg.run_dir, name=None)
+
+    callbacks = [
+        dafm.callbacks.DAProgressBar(cfg),
+        dafm.callbacks.LogDAStats(cfg),
     ]
-    enable_progress_bar = False
-    if cfg.model.epoch_count > 0:# or cfg.model.epoch_count_sampling > 0:
-        enable_progress_bar = True
-        cbs.append(callbacks.TimeStepProgressBar(cfg))
     trainer = pl.Trainer(
-        # detect_anomaly=True,
-        enable_progress_bar=enable_progress_bar,
         accelerator=cfg.device,
         devices=1,
         logger=logger,
-        max_epochs=-1,
         check_val_every_n_epoch=None,
-        reload_dataloaders_every_n_epochs=1,
-        deterministic=True,
-        callbacks=cbs,
+        deterministic=not isinstance(cfg.filter, conf.filter.BootstrapParticleFilter),
+        callbacks=callbacks,
+        log_every_n_steps=1,
+        inference_mode=False,
     )
 
-    try:
-        trainer.fit(data_assimilation)
-    except StopIteration as e:
-        if cfg.model.epoch_count == 0 and cfg.model.epoch_count_sampling == 0:
-            pass
-        else:
-            raise e
+    trainer.validate(data_assimilation)
+
+
+@hydra.main(**hydra_init)
+def main(cfg):
+    run(cfg)
 
 
 if __name__ == '__main__':
-    last_override, run_dir = utils.get_run_dir()
-    utils.set_run_dir(last_override, run_dir)
+    last_override, run_dir = conf.conf.get_run_dir(hydra_init=hydra_init)
+    conf.conf.set_run_dir(last_override, run_dir)
     main()

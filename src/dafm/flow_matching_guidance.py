@@ -3,7 +3,7 @@ import torch.distributions
 from einops import rearrange, reduce
 
 from conf import flow_matching_guidance
-import dafm.diffusion_path
+import dafm.prob_path
 from dafm import utils
 
 
@@ -24,9 +24,9 @@ class No(EnergyGuidance):
 
 
 class MonteCarlo(EnergyGuidance):
-    def __init__(self, cfg, diffusion_path):
+    def __init__(self, cfg, prob_path):
         super().__init__(cfg)
-        self.diffusion_path = diffusion_path
+        self.prob_path = prob_path
 
     def conditional_velocity(self, mean, dt_mean, std, dt_std, time, x):
         return dt_std / std * (x - mean) + dt_mean
@@ -36,8 +36,8 @@ class MonteCarlo(EnergyGuidance):
         x1 = rearrange(x1, 'monte_carlo_sample_count dim -> monte_carlo_sample_count 1 dim')
         xt = rearrange(xt, 'predicted_state_count dim -> 1 predicted_state_count dim')
 
-        mean = self.diffusion_path.mean(t, x1)
-        std = self.diffusion_path.std(t, x1)
+        mean = self.prob_path.mean(t, x1)
+        std = self.prob_path.std(t, x1)
         # using Independent(Normal, 1) instead of MultivariateNormal is a trick
         # to specify the covariance matrix as scale * (identity matrix)
         pt_xt_given_z = utils.Independent(
@@ -61,8 +61,8 @@ class MonteCarlo(EnergyGuidance):
             torch.logsumexp,
         )
         v_xt_given_z = self.conditional_velocity(
-            mean, self.diffusion_path.dt_mean(t, x1),
-            std, self.diffusion_path.dt_std(t, x1),
+            mean, self.prob_path.dt_mean(t, x1),
+            std, self.prob_path.dt_std(t, x1),
             t, xt
         )
         return reduce(
@@ -97,15 +97,19 @@ def get_schedule(cfg):
         raise ValueError(f'Unknown schedule: {cfg}')
 
 
-def get_guidance(cfg):
+def get_guidance(cfg, rng=None):
     if isinstance(cfg, flow_matching_guidance.No):
         return No(cfg)
     elif isinstance(cfg, flow_matching_guidance.MonteCarlo):
-        diffusion_path = dafm.diffusion_path.get_diffusion_path(
-            cfg.diffusion_path,
+        if rng is None:
+            raise ValueError('MonteCarlo guidance requires a random number generator. '
+                             'Please pass the keyword argument rng.')
+        prob_path = dafm.prob_path.get_prob_path(
+            cfg.prob_path,
+            rng,
             target_distribution_at_time_1=True  # always flow matching model
         )
-        return MonteCarlo(cfg, diffusion_path)
+        return MonteCarlo(cfg, prob_path)
     elif isinstance(cfg, flow_matching_guidance.Local):
         schedule = get_schedule(cfg.schedule)
         return Local(cfg, schedule)

@@ -1,0 +1,3 @@
+defaults:
+  - OptunaStudy@optuna_study
+  - _self_

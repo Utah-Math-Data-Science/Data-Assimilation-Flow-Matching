@@ -1,0 +1,27 @@
+# @package _global_
+defaults:
+  - override /dataset@setting.dataset: DynamicalSystemImpl
+  - override /dataset/system@setting.dataset.system: Lorenz96
+  - override /splitter@setting.splitter: OneSplit
+  - _self_
+
+setting:
+  dataset:
+    time_step_count: ${add:${..splitter.start_train},${mul:${..observe_every_n_time_steps},80}}
+    system:
+      time_step_size: .01
+      true_state_initial_condition_mean: 0.
+      true_state_initial_condition_std: 3.
+      dimension: 1000000
+  splitter:
+    start_train: 1000
+    len_train: ${sub:${..dataset.time_step_count},${.start_train}}
+  obs_noise_std: .05
+  observe_every_n_time_steps: 10
+  observes:
+    - _target_: conf.observe.ObserveATan
+      order: 0
+  ensemble_initial_mean_is_true_state: false
+filter:
+  ensemble_size: 20
+  ensemble_initial_std: 1.

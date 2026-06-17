@@ -1,7 +1,0 @@
-defaults:
-  - _MonteCarlo
-  - override diffusion_path: ConditionalOptimalTransport
-  - _self_
-
-diffusion_path:
-  sigma_min: ${oc.select:model.diffusion_path.sigma_min,0.}
